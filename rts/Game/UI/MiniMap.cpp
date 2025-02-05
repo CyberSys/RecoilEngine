@@ -1965,7 +1965,7 @@ void CMiniMap::DrawWorldStuff() const
 		projectileDrawer->DrawProjectilesMiniMap();
 	}
 
-	shadowHandler.DrawFrustumDebug();
+	shadowHandler.DrawFrustumDebugMiniMap();
 	DebugVisibilityDrawer::DrawMinimap();
 
 	{
