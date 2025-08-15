@@ -24,6 +24,7 @@
 #include "Net/Protocol/NetProtocol.h"
 #include "Rendering/GlobalRendering.h"
 #include "Sim/Misc/GlobalSynced.h"
+#include "Sim/Misc/ModInfo.h"
 #include "Sim/Misc/TeamHandler.h"
 #include "Sim/Path/IPathManager.h"
 #include "Sim/Units/UnitHandler.h"
@@ -1163,6 +1164,8 @@ void CGame::ClientReadNet()
 							LOG_L(L_ERROR, "[Game::%s][TEAMMSG_GIVEWAY] invalid team-numbers {%i,%i}", __func__, toTeam, giverTeam);
 							break;
 						}
+						if (!modInfo.allowGiveawayResign)
+							return;
 
 						const size_t numPlayersInGiverTeam      = playerHandler.NumActivePlayersInTeam(giverTeam);
 						const size_t  numTotAIsInGiverTeam      = skirmishAIHandler.GetSkirmishAIsInTeam(giverTeam).size();

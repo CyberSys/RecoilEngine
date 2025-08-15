@@ -232,6 +232,7 @@ public:
 
 	bool nativeExcessSharing;
 	bool allowTake;
+	bool allowGiveawayResign;
 	bool allowEnginePlayerlist;
 
 	// how often to report wind speed/direction to wind gens
