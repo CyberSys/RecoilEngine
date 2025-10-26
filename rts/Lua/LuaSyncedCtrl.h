@@ -52,6 +52,8 @@ class LuaSyncedCtrl
 		static int SetTeamShareLevel(lua_State* L);
 		static int ShareTeamResource(lua_State* L);
 
+		static int AddTeamResourceStats(lua_State* L);
+
 		static int CallCOBScript(lua_State* L);
 		static int GetCOBScriptID(lua_State* L);
 

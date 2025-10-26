@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <cctype>
+#include <ranges>
 
 #include "LuaSyncedCtrl.h"
 
@@ -39,6 +40,7 @@
 #include "Sim/Misc/DamageArrayHandler.h"
 #include "Sim/Misc/LosHandler.h"
 #include "Sim/Misc/ModInfo.h"
+#include "Sim/Misc/ResourceHandler.h"
 #include "Sim/Misc/SmoothHeightMesh.h"
 #include "Sim/Misc/Team.h"
 #include "Sim/Misc/TeamHandler.h"
@@ -150,6 +152,8 @@ bool LuaSyncedCtrl::PushEntries(lua_State* L)
 	REGISTER_LUA_CFUNC(SetTeamResource);
 	REGISTER_LUA_CFUNC(SetTeamShareLevel);
 	REGISTER_LUA_CFUNC(ShareTeamResource);
+
+	REGISTER_LUA_CFUNC(AddTeamResourceStats);
 
 	REGISTER_LUA_CFUNC(SetGameRulesParam);
 	REGISTER_LUA_CFUNC(SetTeamRulesParam);
@@ -1424,6 +1428,70 @@ int LuaSyncedCtrl::ShareTeamResource(lua_State* L)
 	return 0;
 }
 
+/*** Adjusts a team's resource statistics, for post-game graphs.
+ *
+ * @function Spring.AddTeamResourceStats
+ * @param teamID integer
+ * @param amounts table
+ * @return nil
+ */
+int LuaSyncedCtrl::AddTeamResourceStats(lua_State* L)
+{
+	const auto team = ParseTeam(L, __func__, 1);
+	if (team == nullptr)
+		return 0;
+
+	if (!lua_istable(L, 2))
+		return 0;
+
+	auto& stats = team->GetCurrentStats();
+	for (lua_pushnil(L); lua_next(L, 2) != 0; lua_pop(L, 1)) {
+		if (!lua_isstring(L, LUA_TABLE_KEY_INDEX))
+			continue;
+		if (!lua_istable(L, LUA_TABLE_VALUE_INDEX))
+			continue;
+
+		using TS = TeamStatistics;
+		std::array <float TS::*, SResourcePack::MAX_RESOURCES> entries;
+		switch (hashString(lua_tostring(L, LUA_TABLE_KEY_INDEX))) {
+			case hashString("used")    : entries = {&TS::metalUsed    , &TS::energyUsed    }; break;
+			case hashString("produced"): entries = {&TS::metalProduced, &TS::energyProduced}; break;
+			case hashString("excess")  : entries = {&TS::metalExcess  , &TS::energyExcess  }; break;
+			case hashString("received"): entries = {&TS::metalReceived, &TS::energyReceived}; break;
+			case hashString("sent")    : entries = {&TS::metalSent    , &TS::energySent    }; break;
+			default: continue;
+		}
+
+		for (int i = 0; i < entries.size(); ++i) {
+			// Parse by resource index, like `produced = { 1.23, 45.6 }`
+			lua_rawgeti(L, LUA_TABLE_VALUE_INDEX, i+1);
+			if (lua_isnumber(L, -1))
+				stats.*entries.at(i) += lua_tonumber(L, -1);
+			lua_pop(L, 1);
+
+			// Parse by name, like `produced = { energy = 45.6, metal = 1.23 }`
+			const auto resourceDef = CResourceHandler::GetInstance()->GetResource(i);
+			if (!resourceDef)
+				continue;
+
+			/* TODO. The resource handler calls the resources Metal and Energy,
+			 * uppercase, but essentially everywhere else they're lowercase so
+			 * here I also adjust to the effective standard. Once resources can
+			 * be customized this will stop being a problem and the name can be
+			 * passed raw, without making a lowercase copy. */
+			std::string resourceName = resourceDef->name;
+			std::ranges::transform(resourceName, resourceName.begin(), [](unsigned char c){ return std::tolower(c); });
+
+			lua_pushsstring(L, resourceName);
+			lua_rawget(L, LUA_TABLE_VALUE_INDEX);
+			if (lua_isnumber(L, -1))
+				stats.*entries.at(i) += lua_tonumber(L, -1);
+			lua_pop(L, 1);
+		}
+	}
+
+	return 0;
+}
 
 /******************************************************************************
  * Rules Params
