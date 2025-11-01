@@ -39,7 +39,7 @@ static inline int SkipColorCodes(const spring::u8string& text, T* pos, SColor* c
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	int colorFound = 0;
-	while (text[(*pos)] == CTextWrap::ColorCodeIndicator) {
+	while (text[(*pos)] == CTextWrap::ColorCodeIndicator || (!fontHandler.disableOldColorIndicators && text[(*pos)] == CTextWrap::OldColorCodeIndicator)) {
 		(*pos) += 4;
 		if ((*pos) >= text.size()) {
 			return -(1 + colorFound);
@@ -428,6 +428,9 @@ void CTextWrap::SplitTextInWords(const spring::u8string& text, std::list<word>* 
 	RECOIL_DETAILED_TRACY_ZONE;
 	const unsigned int length = (unsigned int)text.length();
 	const float spaceAdvance = GetGlyph(spaceUTF16).advance;
+
+	// Scan in advance so we avoid calls on every step of splitting.
+	ScanForWantedGlyphs(text);
 
 	words->push_back(word());
 	word* w = &(words->back());

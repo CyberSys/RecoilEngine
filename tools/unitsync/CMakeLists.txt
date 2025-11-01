@@ -14,6 +14,9 @@ list(APPEND unitsync_libs 7zip prd::jsoncpp lua headlessStubs archives_nothreadp
 list(APPEND unitsync_libs ZLIB::ZLIB)
 list(APPEND unitsync_libs ${SPRING_MINIZIP_LIBRARY})
 
+### base64 from pr-downloader
+list(APPEND unitsync_libs "prd::base64")
+
 ### smmalloc
 list(APPEND unitsync_libs "smmalloc")
 
@@ -57,6 +60,8 @@ set(main_files
 	"${ENGINE_SRC_ROOT}/ExternalAI/LuaAIImplHandler.cpp"
 	"${ENGINE_SRC_ROOT}/Game/GameVersion.cpp"
 	"${ENGINE_SRC_ROOT}/Lua/LuaConstEngine.cpp"
+	"${ENGINE_SRC_ROOT}/Lua/LuaEncoding.cpp"
+	"${ENGINE_SRC_ROOT}/Lua/LuaMathExtra.cpp"
 	"${ENGINE_SRC_ROOT}/Lua/LuaMemPool.cpp"
 	"${ENGINE_SRC_ROOT}/Lua/LuaParser.cpp"
 	"${ENGINE_SRC_ROOT}/Lua/LuaUtils.cpp"
@@ -79,8 +84,11 @@ set(main_files
 	"${ENGINE_SRC_ROOT}/System/Platform/ScopedFileLock.cpp"
 	"${ENGINE_SRC_ROOT}/System/Platform/Threading.cpp"
 	"${ENGINE_SRC_ROOT}/System/Threading/ThreadPool.cpp"
+	"${ENGINE_SRC_ROOT}/System/Sync/FPUCheck.cpp"
 	"${ENGINE_SRC_ROOT}/System/Sync/SHA512.cpp"
+	"${ENGINE_SRC_ROOT}/System/SpringMath.cpp"
 	"${ENGINE_SRC_ROOT}/System/CRC.cpp"
+	"${ENGINE_SRC_ROOT}/System/float3.cpp"
 	"${ENGINE_SRC_ROOT}/System/float4.cpp"
 	"${ENGINE_SRC_ROOT}/System/Info.cpp"
 	"${ENGINE_SRC_ROOT}/System/LogOutput.cpp"

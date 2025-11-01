@@ -1,12 +1,12 @@
 /* This file is part of the Spring engine (GPL v2 or later), see LICENSE.html */
 
-#ifndef IATLAS_ALLOC_H
-#define IATLAS_ALLOC_H
+#pragma once
 
 #include <string>
 #include <limits>
+#include <cstdint>
 
-#include "System/float4.h"
+#include "AtlasedTexture.hpp"
 #include "System/type2.h"
 #include "System/UnorderedMap.hpp"
 #include "System/StringHash.h"
@@ -18,17 +18,16 @@ class IAtlasAllocator
 public:
 	struct SAtlasEntry
 	{
-		SAtlasEntry() : data(nullptr) {}
-		SAtlasEntry(const int2 _size, std::string _name, void* _data = nullptr)
+		SAtlasEntry() = default;
+		SAtlasEntry(const int2 _size, std::string _name)
 			: size(_size)
 			, name(std::move(_name))
-			, data(_data)
+			, texCoords()
 		{}
 
 		int2 size;
 		std::string name;
-		float4 texCoords;
-		void* data;
+		AtlasedTexture texCoords;
 	};
 public:
 	IAtlasAllocator() = default;
@@ -38,29 +37,38 @@ public:
 public:
 	virtual bool Allocate() = 0;
 	virtual int GetNumTexLevels() const = 0;
+	virtual int GetReqNumTexLevels() const = 0;
+	virtual uint32_t GetNumPages() const = 0;
 	void SetMaxTexLevel(int maxLevels) { numLevels = maxLevels; };
 public:
-	void AddEntry(const std::string& name, int2 size, void* data = nullptr)
+	void AddEntry(const SAtlasEntry& ae) { AddEntry(ae.name, ae.size); }
+	void AddEntry(const std::string& name, const int2& size)
 	{
 		minDim = argmin(minDim, size.x, size.y);
-		entries[name] = SAtlasEntry(size, name, data);
+		entries[name] = SAtlasEntry(size, name);
 	}
 
-	float4 GetEntry(const std::string& name)
+	auto FindEntry(const std::string& name) const
 	{
-		return entries[name].texCoords;
+		return entries.find(name);
 	}
 
-	void*& GetEntryData(const std::string& name)
-	{
-		return entries[name].data;
+	const auto& GetEntry(const spring::unordered_map<std::string, SAtlasEntry>::const_iterator& it) const {
+		if (it == entries.end())
+			return AtlasedTexture::DefaultAtlasTexture;
+
+		return it->second.texCoords;
 	}
+	const auto& GetEntry(const std::string& name) const { return GetEntry(FindEntry(name));	}
+	const auto& GetEntries() const { return entries; }
 
-	const spring::unordered_map<std::string, SAtlasEntry>& GetEntries() const { return entries; }
-
-	float4 GetTexCoords(const std::string& name)
+	AtlasedTexture GetTexCoords(const spring::unordered_map<std::string, SAtlasEntry>::const_iterator& it)
 	{
-		float4 uv(entries[name].texCoords);
+		if (it == entries.end())
+			return AtlasedTexture::DefaultAtlasTexture;
+
+		AtlasedTexture uv = it->second.texCoords;
+
 		uv.x1 /= atlasSize.x;
 		uv.y1 /= atlasSize.y;
 		uv.x2 /= atlasSize.x;
@@ -73,6 +81,10 @@ public:
 		uv.y2 += 0.5f / atlasSize.y;
 
 		return uv;
+	}
+	AtlasedTexture GetTexCoords(const std::string& name)
+	{
+		return GetTexCoords(FindEntry(name));
 	}
 
 	bool contains(const std::string& name) const
@@ -89,9 +101,8 @@ public:
 
 	int GetMinDim() const { return minDim < std::numeric_limits<int>::max() ? minDim : 1; }
 
-	int2 GetMaxSize() const { return maxsize; }
-	int2 GetAtlasSize() const { return atlasSize; }
-
+	const auto& GetMaxSize() const { return maxsize; }
+	const auto& GetAtlasSize() const { return atlasSize; }
 protected:
 	spring::unordered_map<std::string, SAtlasEntry> entries;
 
@@ -100,5 +111,3 @@ protected:
 	int numLevels = std::numeric_limits<int>::max();
 	int minDim = std::numeric_limits<int>::max();
 };
-
-#endif // IATLAS_ALLOC_H

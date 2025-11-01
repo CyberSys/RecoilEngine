@@ -10,7 +10,6 @@
 #include "Rendering/GL/FBO.h"
 #include "Rendering/Shaders/ShaderHandler.h"
 #include "Rendering/Shaders/Shader.h"
-#include "Rendering/Models/3DModel.h"
 #include "Rendering/Models/ModelRenderContainer.h"
 #include "Rendering/DepthBufferCopy.h"
 #include "System/EventClient.h"
@@ -73,7 +72,7 @@ public:
 	bool CanDrawSoften() {
 		return
 			CheckSoftenExt() &&
-			fxShaders[1] && fxShaders[1]->IsValid() &&
+			fxShader && fxShader->IsValid() &&
 			depthBufferCopy->IsValid(false);
 	};
 
@@ -158,8 +157,8 @@ private:
 
 	std::vector<const AtlasedTexture*> smokeTextures;
 
-	/// projectiles container {modelless, model}
-	std::array<std::vector<CProjectile*>, 2> renderProjectiles;
+	/// projectiles container
+	std::vector<CProjectile*> renderProjectiles;
 
 	/// projectiles with a model, binned by model type and textures
 	std::array<ModelRenderContainer<CProjectile>, MODELTYPE_CNT> modelRenderers;
@@ -169,8 +168,8 @@ private:
 
 	bool drawSorted = true;
 
-	std::array<Shader::IProgramObject*, 2> fxShaders = { nullptr };
-	Shader::IProgramObject* fsShadowShader = nullptr;
+	Shader::IProgramObject* fxShader = nullptr;
+	Shader::IProgramObject* fxShadowShader = nullptr;
 
 	constexpr static int WANT_SOFTEN_COUNT = 2;
 	int wantSoften = 0;

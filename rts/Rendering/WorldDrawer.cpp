@@ -29,7 +29,7 @@
 #include "Rendering/ShadowHandler.h"
 #include "Rendering/Map/InfoTexture/IInfoTextureHandler.h"
 #include "Rendering/Models/IModelParser.h"
-#include "Rendering/Models/3DModelVAO.h"
+#include "Rendering/Models/3DModelVAO.hpp"
 #include "Rendering/Models/ModelsLock.h"
 #include "Rendering/Shaders/ShaderHandler.h"
 #include "Rendering/Textures/ColorMap.h"
@@ -172,7 +172,7 @@ void CWorldDrawer::InitPost() const
 
 void CWorldDrawer::Kill()
 {
-	spring::SafeDelete(infoTextureHandler);
+	infoTextureHandler = nullptr;
 
 	IWater::KillWater();
 	ISky::KillSky();

@@ -58,7 +58,8 @@
 #include "Rendering/Env/MapRendering.h"
 #include "Rendering/GL/glExtra.h"
 #include "Rendering/GL/TexBind.h"
-#include "Rendering/Models/3DModel.h"
+#include "Rendering/Models/3DModelMisc.hpp"
+#include "Rendering/Models/3DModelPiece.hpp"
 #include "Rendering/Shaders/Shader.h"
 #include "Rendering/Textures/Bitmap.h"
 #include "Rendering/Textures/TextureAtlas.h"
@@ -83,8 +84,11 @@
 CONFIG(bool, LuaShaders).defaultValue(true).headlessValue(false).safemodeValue(false);
 CONFIG(int, DeprecatedGLWarnLevel).defaultValue(0).headlessValue(0).safemodeValue(0);
 
-/***
- * Lua OpenGL API
+/*** Callouts for OpenGL API
+ *
+ * Only setters and getters for OpenGL usage in Recoil, see `GL` for constants.
+ *
+ * @see GL
  * @table gl
  */
 
@@ -133,6 +137,8 @@ std::unordered_map<GLenum, std::string> LuaOpenGL::fixedStateEnumToString = {
 
 		FillFixedStateEnumToString(GL_FLAT),
 		FillFixedStateEnumToString(GL_SMOOTH),
+
+		FillFixedStateEnumToString(GL_POINT_SMOOTH),
 
 		FillFixedStateEnumToString(GL_FRONT),
 		FillFixedStateEnumToString(GL_BACK),
@@ -1248,7 +1254,7 @@ int LuaOpenGL::GetViewRange(lua_State* L)
 
 
 /***
- * @function gl.SetSlaveMode
+ * @function gl.SlaveMiniMap
  * @param newMode boolean
  */
 int LuaOpenGL::SlaveMiniMap(lua_State* L)
@@ -1324,13 +1330,26 @@ int LuaOpenGL::DrawMiniMap(lua_State* L)
 ******************************************************************************/
 
 
-/***
+/*** Begin a block of text commands.
+ *
  * @function gl.BeginText
+ *
+ * Text can be drawn without Start/End, but when doing several operations it's more optimal
+ * if done inside a block.
+ *
+ * Also allows disabling automatic setting of the blend mode. Otherwise the font will always print
+ * with `BlendFunc(GL.SRC_ALPHA, GL.ONE_MINUS_SRC_ALPHA)`.
+ *
+ * @param userDefinedBlending boolean? When `true` doesn't set the gl.BlendFunc automatically. Defaults to `false`.
+ *
+ * @see gl.BlendFunc
+ * @see gl.BlendFuncSeparate
  */
 int LuaOpenGL::BeginText(lua_State* L)
 {
 	CheckDrawingEnabled(L, __func__);
-	font->Begin();
+	auto userDefinedBlending = luaL_optboolean(L, 2, false);
+	font->Begin(userDefinedBlending);
 	return 0;
 }
 
@@ -2215,6 +2234,7 @@ int LuaOpenGL::DrawGroundQuad(lua_State* L)
 
 /***
  * @class VertexData
+ * @x_helper
  * @field vert xyz?
  * @field v xyz? Short for `vert`.
  * @field norm float3?
@@ -2993,6 +3013,7 @@ int LuaOpenGL::Color(lua_State* L)
 
 /***
  * @class Material
+ * @x_helper
  * @field shininess number
  * @field ambidiff rgb|rgba
  * @field ambient rgb|rgba
@@ -4069,6 +4090,7 @@ int LuaOpenGL::Texture(lua_State* L)
 
 /***
  * @class Texture
+ * @x_helper
  * @field target GL?
  * @field format integer?
  * @field min_filter GL?
@@ -4272,6 +4294,7 @@ int LuaOpenGL::DeleteTextureFBO(lua_State* L)
 
 /***
  * @class TextureInfo
+ * @x_helper
  * @field xsize integer
  * @field ysize integer
  * @field zsize integer
@@ -4708,12 +4731,30 @@ int LuaOpenGL::MultiTexGen(lua_State* L)
 
 /***
  * @function gl.BindImageTexture
+ * 
+ * For format parameters refer to
+ * https://registry.khronos.org/OpenGL-Refpages/gl4/html/glBindImageTexture.xhtml
+ * and
+ * https://beyond-all-reason.github.io/RecoilEngine/lua-api/types/GL#rgba32f
+ * 
+ * Example uses
+ * local my_texture_id = gl.CreateTexture(...)
+ * 
+ * -- bind layer 1 of my_texture_id if it supports layered bindings to image unit 0
+ * gl.BindImageTexture(0, my_texture_id, 0, 1, GL.READ_WRITE, GL.RGBA16F)
+ * 
+ * -- bind all layers of my_texture_id if it supports layered bindings to image unit 0
+ * gl.BindImageTexture(0, my_texture_id, 0, nil, GL.READ_WRITE, GL.RGBA16F)
+ * 
+ * -- unbind any texture attached to image unit 0
+ * gl.BindImageTexture(0, nil, nil, nil, nil, GL.RGBA16F)
+ * 
  * @param unit integer
- * @param texID string?
- * @param level integer?
- * @param layer integer?
- * @param access integer?
- * @param format integer?
+ * @param texID nil | string (nil breaks any existing binding to the image unit)
+ * @param level nil | integer (Default: 0)
+ * @param layer nil | integer (nil binds the entire texture(array/cube), an integer binds a specific layer, ignored by gl if the texture does not support layered bindings)
+ * @param access GL? (Default: GL.READ_WRITE) Accepts `GL.READ_ONLY`, `GL.WRITE_ONLY` or `GL.READ_WRITE`.
+ * @param format integer (Example: GL.RGBA16F)
  */
 int LuaOpenGL::BindImageTexture(lua_State* L)
 {
@@ -4759,15 +4800,15 @@ int LuaOpenGL::BindImageTexture(lua_State* L)
 	++argNum;
 	//layer
 	GLint layer = 0;
-	GLboolean layered = GL_FALSE;
+	GLboolean layered = GL_TRUE;
 	if (!lua_isnil(L, argNum)) {
 		layer = luaL_optnumber(L, argNum, 0);
-		layered = GL_TRUE;
+		layered = GL_FALSE;
 	}
 
 	++argNum;
 	//access
-	GLenum access = luaL_optnumber(L, argNum, 0);
+	GLenum access = luaL_optnumber(L, argNum, GL_READ_WRITE);
 	if (access != GL_READ_ONLY && access != GL_WRITE_ONLY && access != GL_READ_WRITE)
 		luaL_error(L, "%s Invalid access specified %d. The access must be GL_READ_ONLY or GL_WRITE_ONLY or GL_READ_WRITE.", __func__, access);
 
@@ -4966,7 +5007,7 @@ int LuaOpenGL::GetAtlasTexture(lua_State* L)
 
 	const std::string subAtlasTexName = luaL_checksstring(L, 2);
 
-	AtlasedTexture atlTex = atlas->GetTexture(subAtlasTexName);
+	auto atlTex = atlas->GetTexture(subAtlasTexName);
 	if (atlTex == AtlasedTexture::DefaultAtlasTexture)
 		luaL_error(L, "gl.%s() Invalid atlas named texture specified %s", __func__, subAtlasTexName.c_str());
 
@@ -4974,7 +5015,8 @@ int LuaOpenGL::GetAtlasTexture(lua_State* L)
 	lua_pushnumber(L, atlTex.x2);
 	lua_pushnumber(L, atlTex.y1);
 	lua_pushnumber(L, atlTex.y2);
-	return 4;
+	lua_pushnumber(L, atlTex.pageNum);
+	return 5;
 }
 
 /***
@@ -5397,6 +5439,7 @@ int LuaOpenGL::LoadIdentity(lua_State* L)
 
 /***
  * @class Matrix4x4
+ * @x_helper
  * @field [1] number Element at [1,1]
  * @field [2] number Element at [1,2]
  * @field [3] number Element at [1,3]
@@ -6048,6 +6091,17 @@ int LuaOpenGL::GetFixedState(lua_State* L)
 
 			return 2;
 		} break;
+		case hashString("pointSmooth"):
+		case hashString("pointsmooth"): {
+			CondWarnDeprecatedGL(L, __func__);
+
+			GLboolean pointSmoothFlag;
+
+			glGetBooleanv(GL_POINT_SMOOTH, &pointSmoothFlag);
+			lua_pushnumber(L, pointSmoothFlag);
+
+			return 1;
+		} break;
 		default: {
 			luaL_error(L, "Incorrect first argument (%s) to gl.GetFixedState", param);
 		};
@@ -6342,6 +6396,7 @@ int LuaOpenGL::ReadPixels(lua_State* L)
 
 /***
  * @class SaveImageOptions
+ * @x_helper
  * @field alpha boolean (Default: `false`)
  * @field yflip boolean (Default: `true`)
  * @field grayscale16bit boolean (Default: `false`)

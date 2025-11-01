@@ -7,7 +7,7 @@
 
 #include "WorldObject.h"
 #include "Lua/LuaRulesParams.h"
-#include "Rendering/Models/3DModel.h"
+#include "Rendering/Models/LocalModel.hpp"
 #include "Sim/Misc/CollisionVolume.h"
 #include "System/Matrix44f.h"
 #include "System/type2.h"
@@ -19,6 +19,7 @@
 struct MoveDef;
 struct LocalModelPiece;
 struct SolidObjectDef;
+struct LuaObjectMaterialData;
 
 class DamageArray;
 class CUnit;
@@ -143,13 +144,7 @@ public:
 
 	virtual void UpdatePhysicalState(float eps);
 
-	void Move(const float3& v, bool relative) {
-		const float3& dv = relative? v: (v - pos);
-
-		pos += dv;
-		midPos += dv;
-		aimPos += dv;
-	}
+	void Move(const float3& v, bool relative);
 
 	// this should be called whenever the direction
 	// vectors are changed (ie. after a rotation) in
@@ -190,20 +185,15 @@ public:
 	void UpdateDirVectors(bool useGroundNormal, bool useObjectNormal, float dirSmoothing);
 	void UpdateDirVectors(const float3& uDir);
 
+	virtual void UpdatePrevFrameTransform() = 0;
+
 	CMatrix44f ComposeMatrix(const float3& p) const { return (CMatrix44f(p, -rightdir, updir, frontdir)); }
-	virtual CMatrix44f GetTransformMatrix(bool synced = false, bool fullread = false) const { return CMatrix44f(); };
+	virtual CMatrix44f GetTransformMatrix(bool synced = false, bool fullread = false) const = 0;
 
-	const CollisionVolume* GetCollisionVolume(const LocalModelPiece* lmp) const {
-		if (lmp == nullptr)
-			return &collisionVolume;
-		if (!collisionVolume.DefaultToPieceTree())
-			return &collisionVolume;
+	const CollisionVolume* GetCollisionVolume(const LocalModelPiece* lmp) const;
 
-		return (lmp->GetCollisionVolume());
-	}
-
-	const LuaObjectMaterialData* GetLuaMaterialData() const { return (localModel.GetLuaMaterialData()); }
-	      LuaObjectMaterialData* GetLuaMaterialData()       { return (localModel.GetLuaMaterialData()); }
+	const LuaObjectMaterialData* GetLuaMaterialData() const;
+	      LuaObjectMaterialData* GetLuaMaterialData();
 
 	const LocalModelPiece* GetLastHitPiece(int frame, int synced = true) const {
 		if (frame == pieceHitFrames[synced])
@@ -244,8 +234,8 @@ public:
 	float3 GetObjectSpaceDrawPos(const float3& p) const { return (drawPos + GetObjectSpaceVec(p)); }
 
 	// unsynced mid-{position,vector}s
-	float3 GetMdlDrawMidPos() const { return (GetObjectSpaceDrawPos(WORLD_TO_OBJECT_SPACE * localModel.GetRelMidPos())); }
-	float3 GetObjDrawMidPos() const { return (GetObjectSpaceDrawPos(WORLD_TO_OBJECT_SPACE *               relMidPos  )); }
+	float3 GetMdlDrawMidPos() const;
+	float3 GetObjDrawMidPos() const;
 
 
 	int2 GetMapPos() const { return (GetMapPos(pos)); }
@@ -257,7 +247,7 @@ public:
 	float3 GetDragAccelerationVec(float atmosphericDensity, float waterDensity, float dragCoeff, float frictionCoeff) const;
 	float3 GetWantedUpDir(bool useGroundNormal, bool useObjectNormal, float dirSmoothing) const;
 
-	float GetDrawRadius() const override { return (localModel.GetDrawRadius()); }
+	float GetDrawRadius() const override;
 	float CalcFootPrintMinExteriorRadius(float scale = 1.0f) const;
 	float CalcFootPrintMaxInteriorRadius(float scale = 1.0f) const;
 	float CalcFootPrintAxisStretchFactor() const;
@@ -395,6 +385,9 @@ public:
 	int team = 0;
 	///< allyteam that this->team is part of
 	int allyteam = 0;
+
+	// the object could be spawned before the frame start (via cheats) or during the normal sim frame
+	bool prevFrameNeedsUpdate = true;
 
 	///< [i] := frame on which hitModelPieces[i] was last hit
 	int pieceHitFrames[2] = {-1, -1};

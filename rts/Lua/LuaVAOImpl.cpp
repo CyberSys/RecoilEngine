@@ -11,6 +11,7 @@
 #include "System/SafeUtil.h"
 #include "Rendering/GL/VBO.h"
 #include "Rendering/GL/VAO.h"
+#include "Rendering/Models/3DModel.hpp"
 #include "LuaVBOImpl.h"
 
 #include "LuaUtils.h"
@@ -308,15 +309,15 @@ LuaVAOImpl::DrawCheckResult LuaVAOImpl::DrawCheck(GLenum mode, const DrawCheckIn
 	if (vertLuaVBO)
 		vertLuaVBO->UpdateModelsVBOElementCount(); //need to update elements count because underlyiing VBO could have been updated
 
+	result.baseIndex = std::max(inputs.baseIndex.value_or(0), 0);
+
 	if (indexed) {
 		if (!indxLuaVBO)
 			LuaUtils::SolLuaError("[LuaVAOImpl::%s]: No index buffer is attached. Did you succesfully call vao:AttachIndexBuffer()?", __func__);
 
 		indxLuaVBO->UpdateModelsVBOElementCount(); //need to update elements count because underlyiing VBO could have been updated
 
-		result.baseIndex  = std::max(inputs.baseIndex.value_or(0) , 0);
 		result.baseVertex = std::max(inputs.baseVertex.value_or(0), 0); //can't be checked easily
-
 		result.drawCount = inputs.drawCount.value_or(indxLuaVBO->elementsCount);
 		if (!inputs.drawCount.has_value() || inputs.drawCount.value() <= 0)
 			result.drawCount -= result.baseIndex; //adjust automatically

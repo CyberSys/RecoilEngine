@@ -173,8 +173,8 @@ void QTPFS::PathSearch::InitializeThread(SearchThreadData* threadData) {
 		return false;
 	};
 
-	auto *pathToRepair = ( tryPathRepair && registry.valid(entt::entity(searchID)) )
-			? registry.try_get<IPath>(entt::entity(searchID)) : nullptr;
+	auto *pathToRepair = ( tryPathRepair && registry.valid(QTPFS::entity(searchID)) )
+			? registry.try_get<IPath>(QTPFS::entity(searchID)) : nullptr;
 
 	// Path repairs need only search to the point of finding the beginning of the renaming clean part of the old path.
 	// Such searches are also restricted in the area they can search to avoid creating poor paths that would be better
@@ -432,7 +432,7 @@ void QTPFS::PathSearch::LoadPartialPath(IPath* path) {
 }
 
 void QTPFS::PathSearch::LoadRepairPath() {
-	const auto *pathToRepair = registry.try_get<IPath>(entt::entity(searchID));
+	const auto *pathToRepair = registry.try_get<IPath>(QTPFS::entity(searchID));
 
 	const uint32_t firstCleanNodeId = pathToRepair->GetFirstNodeIdOfCleanPath();
 	const uint32_t nodeCount = pathToRepair->GetGoodNodeCount();
@@ -527,8 +527,8 @@ bool QTPFS::PathSearch::Execute(unsigned int searchStateOffset) {
 	haveFullPath = (fwd.srcSearchNode == fwd.tgtSearchNode);
 	havePartPath = false;
 
-	// early-out
-	if (haveFullPath) {
+	// early-out, but not for a repair path because it needs to build out the remaining path.
+	if (haveFullPath && !doPathRepair) {
 		// Ensure the node data is pulled
 		if ( !rawPathCheck ) {
 			{
@@ -555,7 +555,7 @@ void QTPFS::PathSearch::InitStartingSearchNodes() {
 	bwdPathConnected = false;
 
 	// max nodes is split between forward and reverse search.
-	if (synced){
+	if (pathOwner != nullptr){
 		float relativeModifier = std::max(MAP_RELATIVE_MAX_NODES_SEARCHED, modInfo.qtMaxNodesSearchedRelativeToMapOpenNodes);
 		int relativeLimit = nodeLayer->GetNumOpenNodes() * relativeModifier;
 		int absoluteLimit = std::max(MAP_MAX_NODES_SEARCHED, modInfo.qtMaxNodesSearched);
@@ -655,6 +655,8 @@ static float CircularEaseOut(float t) {
 
 void QTPFS::PathSearch::SetForwardSearchLimit() {
 	RECOIL_DETAILED_TRACY_ZONE;
+	if (pathOwner == nullptr) return;
+
 	auto& fwd = directionalSearchData[SearchThreadData::SEARCH_FORWARD];
 	auto& bwd = directionalSearchData[SearchThreadData::SEARCH_BACKWARD];
 
@@ -706,8 +708,6 @@ bool QTPFS::PathSearch::ExecutePathSearch() {
 
 	bool isFullSearch = !doPartialSearch;
 	int dirThatFinishedTheSearch = 0;
-
-	disallowNodeRevisit = modInfo.qtLowerQualityPaths;
 
 	auto nodeIsTemp = [](const SearchNode& curSearchNode) {
 		return (curSearchNode.GetPathCost(NODE_PATH_COST_H) == std::numeric_limits<float>::infinity());
@@ -1135,7 +1135,7 @@ bool QTPFS::PathSearch::ExecutePathSearch() {
 				if (!bwdPathConnected && !expectIncompletePartialSearch) {
 					haveFullPath = havePartPath = false;
 					rejectPartialSearch = true;
-					// LOG("%s: rejecting partial path 2 (search %x)", __func__, this->GetID());
+					// LOG("%s: rejecting partial path 2 (search %x) bwdNodesSearched=%d", __func__, this->GetID(), int(bwdNodesSearched));
 					return false;
 				}
 
@@ -1207,6 +1207,7 @@ bool QTPFS::PathSearch::ExecutePathSearch() {
 
 bool QTPFS::PathSearch::ExecuteRawSearch() {
 	ZoneScoped;
+	assert(pathOwner != nullptr);
 	auto& fwd = directionalSearchData[SearchThreadData::SEARCH_FORWARD];
 
 	int2 nearestSquare;
@@ -1444,25 +1445,12 @@ void QTPFS::PathSearch::IterateNodeNeighbors(const INode* curNode, unsigned int 
 		if (curSearchNode->GetPrevNode() == nextSearchNode)
 			continue;
 
-		// Forbid the reverse search from trampling on it's preloaded nodes.
-		if ( (searchDir == SearchThreadData::SEARCH_BACKWARD) && (nextSearchNode->GetStepIndex() > 0) ) {
+		// Forbid the reverse search from trampling on it's preloaded nodes for path repair, because even though the
+		// search resticted is to an AABB, the remaining existing path can flow in and out of this region. If we
+		// connect the reverse in this particular scenario, it will create an infinite loop.
+		if ( doPathRepair && (searchDir == SearchThreadData::SEARCH_BACKWARD) && (nextSearchNode->GetStepIndex() > 0) ) {
 			continue;
 		}
-
-		// if (disallowNodeRevisit) {
-		// 	bool alreadyVisited = (nextSearchNode->GetPathCost(NODE_PATH_COST_G) != QTPFS_POSITIVE_INFINITY);
-		// 	constexpr bool improvingStart = false;
-
-		// // 	// The start of a path should look good, a unit that starts off by moving in the wrong
-		// // 	// direction will look weird and will break commands like guard, which regaularly ask
-		// // 	// for path updates. This also cleans up the last bit around the goal due to the
-		// // 	// reverse search, which is an added bonus.
-		// // 	bool improvingStart = (nextSearchNode == searchData.srcSearchNode)
-		// // 						|| (nextSearchNode->GetPrevNode() == searchData.srcSearchNode);
-		// 	if (alreadyVisited && !improvingStart) {
-		// 		continue;
-		// 	}
-		// }
 
 		const bool isTarget = (nextSearchNode == searchData.tgtSearchNode);
 		QTPFS::INode *nxtNode = nullptr;
@@ -2088,7 +2076,8 @@ void QTPFS::PathSearch::TracePath(IPath* path) {
 	//assert(path->NumPoints() - path->GetNodeList().size() == 1 + (-nodesWithoutPoints));
 	
 	uint32_t repathIndex = 0;
-	if (!haveFullPath) {
+	// Unowned paths do not allow repaths - they always perform a full path search.
+	if (!haveFullPath && pathOwner != nullptr) {
 		const float minRepathLength = modInfo.qtRefreshPathMinDist;
 		bool pathIsBigEnoughForRepath = (pathDist >= minRepathLength);
 

@@ -734,7 +734,7 @@ void CGameServer::CheckSync()
 				if (!desyncHasOccurred) {
 					if (globalConfig.dumpGameStateOnDesync) {
 						LOG("Desync detected. Requesting all clients to collect game state information.");
-						Broadcast(CBaseNetProtocol::Get().SendGameStateDump());
+						Broadcast(CBaseNetProtocol::Get().SendGameStateDump(syncErrorFrame));
 					}
 					desyncHasOccurred = true;
 				}
@@ -2718,10 +2718,11 @@ void CGameServer::UpdateLoop()
 		Threading::SetAffinity(~0);
 
 		while (!quitServer) {
-			spring_msecs(loopSleepTime).sleep(true);
 
 			if (udpListener != nullptr)
-				udpListener->Update();
+				udpListener->Update(loopSleepTime);
+			else
+				spring_msecs(loopSleepTime).sleep(true);
 
 			std::lock_guard<spring::recursive_mutex> scoped_lock(gameServerMutex);
 			ServerReadNet();

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.27)
 cmake_policy(SET CMP0060 OLD) #causes link errors on Linux otherwise
 cmake_policy(SET CMP0065 OLD) #we need binaries compiled with -rdynamic for BARb to work (cause unknown https://github.com/beyond-all-reason/spring/issues/405)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -107,7 +107,7 @@ set(MARCH_FLAG ${MARCH} CACHE STRING "CPU optimization (use `generic` for generi
 if    (CMAKE_SIZEOF_VOID_P EQUAL 8)
 	set(MARCH_BITS 64 CACHE INTERNAL "" FORCE)
 else  (CMAKE_SIZEOF_VOID_P EQUAL 8)
-	set(MARCH_BITS 32 CACHE INTERNAL "" FORCE)
+	message(FATAL_ERROR "RecoilEngine does not support 32 bits." )
 endif (CMAKE_SIZEOF_VOID_P EQUAL 8)
 
 message(STATUS "Building Spring on ${MARCH_BITS}bit environment")
@@ -142,17 +142,9 @@ else  (UNIX AND NOT MINGW)
 		if (DEFINED ENV{MINGWLIBS})
 			set(MINGWLIBS $ENV{MINGWLIBS} CACHE PATH "Location of the mingwlibs package")
 		elseif(MSVC)
-			if(BUILD_BITS EQUAL 32)
-				set(MINGWLIBS ${CMAKE_SOURCE_DIR}/vclibs CACHE PATH "Location of the vclibs package")
-			else(BUILD_BITS EQUAL 32)
-				set(MINGWLIBS ${CMAKE_SOURCE_DIR}/vclibs64 CACHE PATH "Location of the vclibs package")
-			endif(BUILD_BITS EQUAL 32)
+			set(MINGWLIBS ${CMAKE_SOURCE_DIR}/vclibs64 CACHE PATH "Location of the vclibs package")
 		else()
-			if(BUILD_BITS EQUAL 32)
-				set(MINGWLIBS ${CMAKE_SOURCE_DIR}/mingwlibs CACHE PATH "Location of the mingwlibs package")
-			else(BUILD_BITS EQUAL 32)
-				set(MINGWLIBS ${CMAKE_SOURCE_DIR}/mingwlibs64 CACHE PATH "Location of the mingwlibs package")
-			endif(BUILD_BITS EQUAL 32)
+			set(MINGWLIBS ${CMAKE_SOURCE_DIR}/mingwlibs64 CACHE PATH "Location of the mingwlibs package")
 		endif()
 	endif ()
 	if    (EXISTS "${MINGWLIBS}" AND IS_DIRECTORY "${MINGWLIBS}")
@@ -193,6 +185,9 @@ else  (UNIX AND NOT MINGW)
 		add_definitions(-D_ENABLE_EXTENDED_ALIGNED_STORAGE)
 		add_definitions(-DNOMINMAX -DWIN32_LEAN_AND_MEAN)
 		add_compile_options(/bigobj)
+		add_compile_options(/utf-8) ## new FMT refuses to compile w/o it
+		add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/Zc:__cplusplus>) ## define __cplusplus value properly / https://learn.microsoft.com/en-us/cpp/build/reference/zc-cplusplus?view=msvc-170
+		add_definitions(-D_ITERATOR_DEBUG_LEVEL=0) ## attempt to make debug MSVC builds faster
 		#set(EXE_FLAGS WIN32)
 	endif()
 endif (UNIX AND NOT MINGW)
@@ -249,6 +244,12 @@ option(SYNCCHECK "Check sync during gameplay (Required for online play!)" TRUE)
 if    (SYNCCHECK)
 	add_definitions(-DSYNCCHECK)
 endif (SYNCCHECK)
+
+option(SYNC_HISTORY "Save sync history (for semidebug builds)" FALSE)
+set(SYNC_HISTORY ON CACHE BOOL "Force enable save sync history" FORCE)
+if    (SYNC_HISTORY)
+	add_definitions(-DSYNC_HISTORY)
+endif (SYNC_HISTORY)
 
 option(NO_CREG "Disable creg support" FALSE)
 if    (NO_CREG)
@@ -384,6 +385,10 @@ if(NOT MSVC)
 		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsignaling-nans")
 	endif()
 
+	## warning: space between quotes and suffix is deprecated in C++23
+	## [[nodiscard]] constexpr uint32_t operator"" _hs(const char* str, std::size_t) noexcept
+	## it's been quite annoying since we switched to C++23
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-literal-operator")
 
 	### CompileTime Warnings
 	set(COMMON_WARNINGS "${COMMON_WARNINGS} -Wformat -Wformat-security")

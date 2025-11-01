@@ -295,7 +295,7 @@ void RecoilGetTexParams(GLenum target, GLuint textureID, GLint level, TexturePar
 void glSaveTexture(const GLuint textureID, const char* filename, int level)
 {
 	TextureParameters params;
-	RecoilGetTexParams(GL_TEXTURE_2D, textureID, 0, params);
+	RecoilGetTexParams(GL_TEXTURE_2D, textureID, level, params);
 
 	CBitmap bmp;
 	GLenum extFormat = params.isNormalizedDepth ? GL_DEPTH_COMPONENT : CBitmap::GetExtFmt(params.chNum);
@@ -316,6 +316,48 @@ void glSaveTexture(const GLuint textureID, const char* filename, int level)
 	}
 }
 
+
+void glSaveTextureArray(const GLuint textureID, const char* filename, int level, int page)
+{
+	TextureParameters params;
+	RecoilGetTexParams(GL_TEXTURE_2D_ARRAY, textureID, level, params);
+
+	GLenum extFormat = params.isNormalizedDepth ? GL_DEPTH_COMPONENT : CBitmap::GetExtFmt(params.chNum);
+
+	CBitmap bmp;
+	bmp.Alloc(params.sizeX, params.sizeY, params.chNum, params.prefDataType);
+
+	if (GLAD_GL_VERSION_4_5) {
+		//DSA, needs no binding
+		glGetTextureSubImage(textureID, level, 0, 0, page, params.sizeX, params.sizeY, 1, extFormat, params.prefDataType, bmp.GetMemSize(), bmp.GetRawMem());
+	}
+	else {
+		const size_t pageSize = params.sizeX * params.sizeY * params.chNum * CBitmap::GetDataTypeSize(params.prefDataType);
+		const size_t allPagesSize = pageSize * params.sizeZ;
+		assert(params.imageSize == allPagesSize);
+
+		static std::vector<uint8_t> dataBytes;
+		dataBytes.resize(allPagesSize);
+
+		auto texBind = GL::TexBind(GL_TEXTURE_2D_ARRAY, textureID);
+		glGetTexImage(GL_TEXTURE_2D_ARRAY, level, extFormat, params.prefDataType, dataBytes.data());
+
+		std::copy(
+			dataBytes.data() + (page + 0) * pageSize,
+			dataBytes.data() + (page + 1) * pageSize,
+			bmp.GetRawMem()
+		);
+	}
+
+	if (params.isNormalizedDepth) {
+		//doesn't work, TODO: fix
+		bmp.SaveFloat(filename);
+	}
+	else {
+		bmp.Save(filename, params.bpp < 32);
+	}
+}
+
 void RecoilTexStorage2D(GLenum target, GLint levels, GLint internalFormat, GLsizei width, GLsizei height)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
@@ -325,8 +367,8 @@ void RecoilTexStorage2D(GLenum target, GLint levels, GLint internalFormat, GLsiz
 	if (GLAD_GL_ARB_texture_storage) {
 		glTexStorage2D(target, levels, internalFormat, width, height);
 	} else {
-		auto format = GL::GetInternalFormatDataFormat(internalFormat);
-		auto type   = GL::GetInternalFormatDataType(internalFormat);
+		auto format = GL::GetDataFormatFromInternalFormat(internalFormat);
+		auto type   = GL::GetDataTypeFromInternalFormat(internalFormat);
 
 		for (int level = 0; level < levels; ++level)
 			glTexImage2D(target, level, internalFormat, std::max(width >> level, 1), std::max(height >> level, 1), 0, format, type, nullptr);
@@ -344,8 +386,8 @@ void RecoilTexStorage3D(GLenum target, GLint levels, GLint internalFormat, GLsiz
 	if (GLAD_GL_ARB_texture_storage) {
 		glTexStorage3D(target, levels, internalFormat, width, height, depth);
 	} else {
-		auto format = GL::GetInternalFormatDataFormat(internalFormat);
-		auto type   = GL::GetInternalFormatDataType(internalFormat);
+		auto format = GL::GetDataFormatFromInternalFormat(internalFormat);
+		auto type   = GL::GetDataTypeFromInternalFormat(internalFormat);
 
 		for (int level = 0; level < levels; ++level)
 			glTexImage3D(target, level, internalFormat, std::max(width >> level, 1), std::max(height >> level, 1), std::max(depth >> level, 1), 0, format, type, nullptr);
@@ -359,19 +401,7 @@ void RecoilBuildMipmaps(const GLenum target, GLint internalFormat, const GLsizei
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 
-	if (globalRendering->compressTextures) {
-		switch (internalFormat) {
-			case 4:
-			case GL_RGBA8 :
-			case GL_RGBA :  internalFormat = GL_COMPRESSED_RGBA_ARB; break;
-
-			case 3:
-			case GL_RGB8 :
-			case GL_RGB :   internalFormat = GL_COMPRESSED_RGB_ARB; break;
-
-			case GL_LUMINANCE: internalFormat = GL_COMPRESSED_LUMINANCE_ARB; break;
-		}
-	}
+	internalFormat = GL::GetCompressedInternalFormat(internalFormat);
 
 	// the number of required levels was not specified, assume the request for
 	// mipmapped texture, determine the number of levels

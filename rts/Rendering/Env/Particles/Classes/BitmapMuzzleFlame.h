@@ -36,7 +36,13 @@ private:
 	float length;
 	float sizeGrowth;
 	float frontOffset;
+	float particleSpeed;
+	float particleSpeedSpread;
+	float airdrag;
+	float3 gravity;
 	int ttl;
+	bool drawSideX;
+	bool drawSideY;
 
 	float invttl;
 };

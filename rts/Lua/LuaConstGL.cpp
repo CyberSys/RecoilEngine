@@ -9,14 +9,16 @@
 #include "Rendering/GL/myGL.h"
 
 
-/***
- * OpenGL Constants
+/*** Constants for OpenGL API
+ *
+ * For callouts related to OpenGL usage in Recoil, see `gl`.
+ *
+ * @see gl
  * @enum GL
  */
 
 bool LuaConstGL::PushEntries(lua_State* L)
 {
-/*** @field GL.cmd integer */
 #define PUSH_GL(cmd) LuaPushNamedNumber(L, #cmd, GL_ ## cmd)
 
 	/***
@@ -480,6 +482,8 @@ bool LuaConstGL::PushEntries(lua_State* L)
 	PUSH_GL(TEXTURE_1D);
 	/*** @field GL.TEXTURE_2D integer */
 	PUSH_GL(TEXTURE_2D);
+	/*** @field GL.TEXTURE_2D_ARRAY integer */
+	PUSH_GL(TEXTURE_2D_ARRAY);
 	/*** @field GL.TEXTURE_3D integer */
 	PUSH_GL(TEXTURE_3D);
 	/*** @field GL.TEXTURE_CUBE_MAP integer */
@@ -697,8 +701,6 @@ bool LuaConstGL::PushEntries(lua_State* L)
 	/*** @field GL.STENCIL_ATTACHMENT_EXT integer */
 	PUSH_GL(STENCIL_ATTACHMENT_EXT);
 
-	return true;
-
 	/******************************************************************************
 	 * OpenGL Object Types
 	 * @section objecttypes
@@ -724,6 +726,8 @@ bool LuaConstGL::PushEntries(lua_State* L)
 	PUSH_GL(FRAMEBUFFER);
 
 	return true;
+
+#undef PUSH_GL
 }
 
 

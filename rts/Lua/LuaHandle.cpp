@@ -1,6 +1,7 @@
 /* This file is part of the Spring engine (GPL v2 or later), see LICENSE.html */
 
 #include "LuaHandle.h"
+#include "lua_privileges.h"
 
 #include "LuaGaia.h"
 #include "LuaRules.h"
@@ -10,17 +11,19 @@
 #include "LuaConfig.h"
 #include "LuaHashString.h"
 #include "LuaOpenGL.h"
-#include "LuaBitOps.h"
+#include "LuaEncoding.h"
 #include "LuaMathExtra.h"
 #include "LuaTableExtra.h"
 #include "LuaTracyExtra.h"
 #include "LuaUtils.h"
 #include "LuaZip.h"
 #include "Game/Game.h"
+#include "Game/GameHelper.h"
 #include "Game/Action.h"
 #include "Game/GlobalUnsynced.h"
 #include "Game/Players/Player.h"
 #include "Game/Players/PlayerHandler.h"
+#include "Sim/Misc/LosHandler.h"
 #include "Net/Protocol/NetProtocol.h"
 #include "Game/UI/KeySet.h"
 #include "Game/UI/MiniMap.h"
@@ -28,9 +31,12 @@
 #include "Rml/Backends/RmlUi_Backend.h"
 #include "Sim/Misc/GlobalSynced.h"
 #include "Sim/Misc/TeamHandler.h"
+#include "Sim/Projectiles/ExplosionGenerator.h"
 #include "Sim/Projectiles/Projectile.h"
 #include "Sim/Projectiles/WeaponProjectiles/WeaponProjectile.h"
 #include "Sim/Features/FeatureDef.h"
+#include "Sim/Units/Scripts/CobDeferredCallin.h"
+#include "Sim/Units/Scripts/CobInstance.h" // for UNPACK{X,Z}
 #include "Sim/Units/Unit.h"
 #include "Sim/Units/UnitDef.h"
 #include "Sim/Weapons/Weapon.h"
@@ -70,6 +76,8 @@ static spring::unsynced_set<const luaContextData*>  UNSYNCED_LUAHANDLE_CONTEXTS;
 const  spring::unsynced_set<const luaContextData*>*          LUAHANDLE_CONTEXTS[2] = {&UNSYNCED_LUAHANDLE_CONTEXTS, &SYNCED_LUAHANDLE_CONTEXTS};
 
 bool CLuaHandle::devMode = false;
+
+const int* CLuaHandle::currentCobArgs = nullptr;
 
 /***
  * @class Callins
@@ -147,6 +155,8 @@ CLuaHandle::CLuaHandle(const string& _name, int _order, bool _userMode, bool _sy
 	D.gcCtrl.baseMemLoadMult = configHandler->GetFloat("LuaGarbageCollectionMemLoadMult");
 	D.gcCtrl.baseRunTimeMult = configHandler->GetFloat("LuaGarbageCollectionRunTimeMult");
 
+	currentCobArgs = nullptr;
+
 	L = LUA_OPEN(&D);
 	L_GC = lua_newthread(L);
 
@@ -173,6 +183,9 @@ CLuaHandle::CLuaHandle(const string& _name, int _order, bool _userMode, bool _sy
 CLuaHandle::~CLuaHandle()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
+
+	currentCobArgs = nullptr;
+
 	// KillLua() must be called before us!
 	assert(!IsValid());
 	assert(!eventHandler.HasClient(this));
@@ -533,6 +546,35 @@ bool CLuaHandle::LoadCode(lua_State* L, std::string code, const string& debug)
 
 	// call Initialize immediately after load
 	return (RunCallInTraceback(L, cmdStr, 0, 0, traceBack.GetErrFuncIdx(), false));
+}
+
+
+int CLuaHandle::LoadStringData(lua_State* L)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	size_t len;
+	const char *str    = luaL_checklstring(L, 1, &len);
+	const char *chunkname = luaL_optstring(L, 2, str);
+
+	auto handle = GetHandle(L);
+
+	if (luaL_loadbuffer_privileged(L, str, len, chunkname, handle->GetDevMode()) != 0) {
+		lua_pushnil(L);
+		lua_insert(L, -2);
+		return 2; // nil, then the error message
+	}
+
+	// set the chunk's fenv to the current fenv
+	if (lua_istable(L, 3)) {
+		lua_pushvalue(L, 3);
+	} else {
+		LuaUtils::PushCurrentFuncEnv(L, __func__);
+	}
+
+	if (lua_setfenv(L, -2) == 0)
+		luaL_error(L, "[%s] error with setfenv", __func__);
+
+	return 1;
 }
 
 
@@ -2068,7 +2110,8 @@ void CLuaHandle::FeatureDamaged(
  * Projectiles
  * @section projectiles
  *
- * The following Callins are only called for weaponDefIDs registered via Script.SetWatchWeapon.
+ * The following Callins are only called for weaponDefIDs registered
+ * via Script.SetWatchWeapon or Script.SetWatchProjectile.
 ******************************************************************************/
 
 /*** Called when the projectile is created.
@@ -2081,6 +2124,8 @@ void CLuaHandle::FeatureDamaged(
  * @param proOwnerID integer
  * @param weaponDefID integer
  *
+ * @see Script.SetWatchProjectile
+ * @see Script.SetWatchWeapon
  */
 void CLuaHandle::ProjectileCreated(const CProjectile* p)
 {
@@ -2127,6 +2172,9 @@ void CLuaHandle::ProjectileCreated(const CProjectile* p)
  * @param proID integer
  * @param ownerID integer
  * @param proWeaponDefID integer
+ *
+ * @see Script.SetWatchProjectile
+ * @see Script.SetWatchWeapon
  */
 void CLuaHandle::ProjectileDestroyed(const CProjectile* p)
 {
@@ -2174,9 +2222,21 @@ void CLuaHandle::ProjectileDestroyed(const CProjectile* p)
 
 /******************************************************************************/
 
+/***
+ * Helper to get Explosion visibility.
+ */
+
+bool CLuaHandle::IsExplosionVisible(const WeaponDef* weaponDef, const CExplosionParams& params)
+{
+	const int allyTeamID = CLuaHandle::GetHandleReadAllyTeam(L);
+	return explGenHandler.PredictExplosionVisible(weaponDef, params, allyTeamID);
+}
+
 /*** Called when an explosion occurs.
  *
  * @function Callins:Explosion
+ *
+ * Only called for weaponDefIDs registered via Script.SetWatchExplosion or Script.SetWatchWeapon.
  *
  * @param weaponDefID integer
  * @param px number
@@ -2184,9 +2244,13 @@ void CLuaHandle::ProjectileDestroyed(const CProjectile* p)
  * @param pz number
  * @param attackerID integer
  * @param projectileID integer
+  *
  * @return boolean noGfx if then no graphical effects are drawn by the engine for this explosion.
+ *
+ * @see Script.SetWatchExplosion
+ * @see Script.SetWatchWeapon
  */
-bool CLuaHandle::Explosion(int weaponDefID, int projectileID, const float3& pos, const CUnit* owner)
+bool CLuaHandle::Explosion(int weaponDefID, const WeaponDef* weaponDef, const CExplosionParams& params)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	// piece-projectile collision (*ALL* other
@@ -2194,10 +2258,15 @@ bool CLuaHandle::Explosion(int weaponDefID, int projectileID, const float3& pos,
 	if (weaponDefID < 0)
 		return false;
 
-	// if empty, we are not a LuaHandleSynced
+	// if empty, we are a handle with no explosion watch support.
 	if (watchExplosionDefs.empty())
 		return false;
 	if (!watchExplosionDefs[weaponDefID])
+		return false;
+
+	bool synced = GetHandleSynced(L);
+
+	if (!synced && !IsExplosionVisible(weaponDef, params))
 		return false;
 
 	LUA_CALL_IN_CHECK(L, false);
@@ -2208,15 +2277,15 @@ bool CLuaHandle::Explosion(int weaponDefID, int projectileID, const float3& pos,
 		return false;
 
 	lua_pushnumber(L, weaponDefID);
-	lua_pushnumber(L, pos.x);
-	lua_pushnumber(L, pos.y);
-	lua_pushnumber(L, pos.z);
-	if (owner != nullptr) {
-		lua_pushnumber(L, owner->id);
+	lua_pushnumber(L, params.pos.x);
+	lua_pushnumber(L, params.pos.y);
+	lua_pushnumber(L, params.pos.z);
+	if (params.owner != nullptr) {
+		lua_pushnumber(L, params.owner->id);
 	} else {
 		lua_pushnil(L); // for backward compatibility
 	}
-	lua_pushnumber(L, projectileID);
+	lua_pushnumber(L, params.projectileID);
 
 	// call the routine
 	if (!RunCallIn(L, cmdStr, 6, 1))
@@ -2225,7 +2294,7 @@ bool CLuaHandle::Explosion(int weaponDefID, int projectileID, const float3& pos,
 	// get the results
 	const bool retval = luaL_optboolean(L, -1, false);
 	lua_pop(L, 1);
-	return retval;
+	return synced && retval;
 }
 
 
@@ -2294,6 +2363,61 @@ bool CLuaHandle::RecvLuaMsg(const string& msg, int playerID)
 
 
 /******************************************************************************/
+
+void CLuaHandle::SetDevMode(bool value)
+{
+	if (value == devMode)
+		return;
+
+	devMode = value;
+
+	for (const auto* lcd : LUAHANDLE_CONTEXTS) {
+		for (const auto* lc : *lcd) {
+			if (!lc || !lc->owner)
+				continue;
+
+			lc->owner->EnactDevMode();
+		}
+	}
+}
+
+
+/* Toggles between empty table and filling it with lua module functions. 
+ */
+void CLuaHandle::SwapEnableModule(lua_State* L, bool enabled, const char* moduleName, lua_CFunction func) const
+{
+	// check if module table already exists
+	lua_getglobal(L, moduleName);
+	const bool missing = lua_isnil(L, -1);
+	lua_pop(L, 1);
+
+	// create an empty module table
+	if (missing) {
+		lua_createtable(L, 0, 0);
+		lua_setglobal(L, moduleName);
+	}
+
+	if (enabled) {
+		// relink methods
+		lua_pushvalue(L, LUA_GLOBALSINDEX);
+		LUA_OPEN_LIB(L, func);
+		lua_pop(L, 1);
+	}
+	else {
+		// unlink all methods
+		lua_getglobal(L, moduleName);
+		lua_pushnil(L);
+		while (lua_next(L, -2))
+		{
+			lua_pop(L, 1);		// pop value
+			lua_pushnil(L);
+			lua_rawset(L, -3);	// pop new value and key
+			lua_pushnil(L);		// restart iteration
+		}
+		lua_pop(L, 1);
+	}
+}
+
 
 void CLuaHandle::HandleLuaMsg(int playerID, int script, int mode, const std::vector<std::uint8_t>& data)
 {
@@ -2777,6 +2901,9 @@ void CLuaHandle::DrawScreenEffects()
 /*** Similar to DrawScreenEffects, this can be used to alter the contents of a frame after it has been completely rendered (i.e. World, MiniMap, Menu, UI).
  *
  * @function Callins:DrawScreenPost
+ *
+ * Note: This callin is invoked after the software rendered cursor (configuration variable HardwareCursor=0) is drawn.
+ *
  * @param viewSizeX number
  * @param viewSizeY number
  */
@@ -2971,6 +3098,7 @@ bool CLuaHandle::KeyMapChanged()
 /*** Key Modifier Params
  *
  * @class KeyModifiers
+ * @x_helper
  *
  * @field right boolean Right mouse key pressed
  * @field alt boolean Alt key pressed
@@ -3026,8 +3154,8 @@ bool CLuaHandle::KeyPress(int keyCode, int scanCode, bool isRepeat)
 
 	if (isGame) {
 		int i = 1;
-		lua_createtable(L, 0, game->lastActionList.size());
-		for (const Action& action: game->lastActionList) {
+		lua_createtable(L, 0, game->GetLastActionList().size());
+		for (const Action& action: game->GetLastActionList()) {
 			lua_createtable(L, 0, 3); {
 				LuaPushNamedString(L, "command",   action.command);
 				LuaPushNamedString(L, "extra",     action.extra);
@@ -3087,8 +3215,8 @@ bool CLuaHandle::KeyRelease(int keyCode, int scanCode)
 
 	if (isGame) {
 		int i = 1;
-		lua_createtable(L, 0, game->lastActionList.size());
-		for (const Action& action: game->lastActionList) {
+		lua_createtable(L, 0, game->GetLastActionList().size());
+		for (const Action& action: game->GetLastActionList()) {
 			lua_createtable(L, 0, 3); {
 				LuaPushNamedString(L, "command",   action.command);
 				LuaPushNamedString(L, "extra",     action.extra);
@@ -3658,13 +3786,31 @@ bool CLuaHandle::MapDrawCmd(int playerID, int type,
 
 
 /***
+ * @enum READY_MESSAGE
+ * @field WAITING "Waiting for players"
+ * @field HOST_WAITING "Waiting for players, press key to force start" when waiting and currently the host, key is the first key bound to the action forcestart
+ * @field CHOOSE_POS "Choose start pos" when current player is not ready and is not a spectator
+ * @field STARTING "Starting in n" where n is the number of seconds
+ */
+
+/***
+ * @enum READY_STATE
+ * @field MISSING "missing" when the player hasn't joined yet (NETMSG_PLAYERNAME wasn't received)
+ * @field READY "ready"
+ * @field NOT_READY "notready"
+ */
+
+/*** Fired when the pregame stage is reached
+ *
+ * Pregame is the stage where player readiness is managed before a game starts.
+ * Game only starts once all players are ready.
  *
  * @function Callins:GameSetup
- * @param state string
- * @param ready boolean
- * @param playerStates table
- * @return boolean success
- * @return boolean newReady
+ * @param state READY_MESSAGE the current message the engine would display to the player
+ * @param ready boolean whether the player is currently ready or not
+ * @param playerStates table<number,READY_STATE> indexed by playerID
+ * @return boolean? gameHandled disables the engine ui when true
+ * @return boolean? newReady whether the player is ready (ignored unless `gameHandled = true`)
  */
 bool CLuaHandle::GameSetup(const string& state, bool& ready,
                            const std::vector< std::pair<int, std::string> >& playerStates)
@@ -3983,12 +4129,6 @@ bool CLuaHandle::AddBasicCalls(lua_State* L)
 	}
 	lua_rawset(L, -3);
 
-	// extra math utilities
-	lua_getglobal(L, "math");
-	LuaBitOps::PushEntries(L);
-	LuaMathExtra::PushEntries(L);
-	lua_pop(L, 1);
-
 	lua_getglobal(L, "table");
 	LuaTableExtra::PushEntries(L);
 	lua_pop(L, 1);
@@ -3996,6 +4136,14 @@ bool CLuaHandle::AddBasicCalls(lua_State* L)
 	return true;
 }
 
+bool CLuaHandle::AddCommonModules(lua_State* L)
+{
+	if (!AddEntriesToTable(L, "Encoding",           LuaEncoding::PushEntries        ))
+		return false;
+	if (!AddEntriesToTable(L, "math",               LuaMathExtra::PushEntries       ))
+		return false;
+	return true;
+}
 
 /***
  * @function Script.GetName
@@ -4181,6 +4329,171 @@ int CLuaHandle::CallOutUpdateCallIn(lua_State* L)
 void CLuaHandle::InitializeRmlUi()
 {
 	rmlui = RmlGui::InitializeLua(L);
+}
+
+
+/******************************************************************************/
+/******************************************************************************/
+
+int CLuaHandle::UnpackCobArg(lua_State* L)
+{
+	if (currentCobArgs == nullptr) {
+		luaL_error(L, "Error in UnpackCobArg(), no current args");
+	}
+	const int arg = luaL_checkint(L, 1) - 1;
+	if ((arg < 0) || (arg >= MAX_LUA_COB_ARGS)) {
+		luaL_error(L, "Error in UnpackCobArg(), bad index");
+	}
+	const int value = currentCobArgs[arg];
+	lua_pushnumber(L, UNPACKX(value));
+	lua_pushnumber(L, UNPACKZ(value));
+	return 2;
+}
+
+
+void CLuaHandle::Cob2Lua(const LuaHashString& name, const CUnit* unit,
+                        int& argsCount, int args[MAX_LUA_COB_ARGS])
+{
+	const bool synced = GetHandleSynced(L);
+	static int callDepth = 0;
+	if (callDepth >= 16) {
+		LOG_L(L_WARNING, "[%s::%s] call overflow: %s", GetName().c_str(), __func__, name.GetString());
+		args[0] = 0; // failure
+		return;
+	}
+
+	if (!synced && !LuaUtils::IsUnitInLos(L, unit))
+		return;
+
+	LUA_CALL_IN_CHECK(L);
+
+	const int top = lua_gettop(L);
+
+	if (!lua_checkstack(L, 1 + 3 + argsCount)) {
+		if (synced)
+			LOG_L(L_WARNING, "[%s::%s] lua_checkstack() error: %s", GetName().c_str(),  __func__, name.GetString());
+		args[0] = 0; // failure
+		lua_settop(L, top);
+		return;
+	}
+
+	if (!name.GetGlobalFunc(L)) {
+		if (synced)
+			LOG_L(L_WARNING, "[%s::%s] missing function: %s", GetName().c_str(), __func__, name.GetString());
+		args[0] = 0; // failure
+		lua_settop(L, top);
+		return;
+	}
+
+	lua_pushnumber(L, unit->id);
+	lua_pushnumber(L, unit->unitDef->id);
+	lua_pushnumber(L, unit->team);
+	for (int a = 0; a < argsCount; a++) {
+		lua_pushnumber(L, args[a]);
+	}
+
+	// call the routine
+	callDepth++;
+	const int* oldArgs = currentCobArgs;
+	currentCobArgs = args;
+
+	const bool error = !RunCallIn(L, name, 3 + argsCount, LUA_MULTRET);
+
+	currentCobArgs = oldArgs;
+	callDepth--;
+
+	// bail on error
+	if (error) {
+		args[0] = 0; // failure
+		lua_settop(L, top);
+		return;
+	}
+
+	// get the results
+	const int retArgs = std::min(lua_gettop(L) - top, (MAX_LUA_COB_ARGS - 1));
+	for (int a = 1; a <= retArgs; a++) {
+		const int index = (a + top);
+		if (lua_isnumber(L, index)) {
+			args[a] = lua_toint(L, index);
+		}
+		else if (lua_isboolean(L, index)) {
+			args[a] = lua_toboolean(L, index) ? 1 : 0;
+		}
+		else if (lua_istable(L, index)) {
+			lua_rawgeti(L, index, 1);
+			lua_rawgeti(L, index, 2);
+			if (lua_isnumber(L, -2) && lua_isnumber(L, -1)) {
+				const int x = lua_toint(L, -2);
+				const int z = lua_toint(L, -1);
+				args[a] = PACKXZ(x, z);
+			} else {
+				args[a] = 0;
+			}
+			lua_pop(L, 2);
+		}
+		else {
+			args[a] = 0;
+		}
+	}
+
+	args[0] = 1; // success
+	lua_settop(L, top);
+}
+
+
+void CLuaHandle::Cob2LuaBatch(const LuaHashString& name, std::vector<CCobDeferredCallin>& callins)
+{
+	const bool synced = GetHandleSynced(L);
+	static int callDepth = 0;
+	if (callDepth >= 16) {
+		LOG_L(L_WARNING, "[%s::%s] call overflow: %s", GetName().c_str(), __func__, name.GetString());
+		return;
+	}
+
+	LUA_CALL_IN_CHECK(L);
+
+	const int top = lua_gettop(L);
+	int argsCount = 0;
+
+	if (!lua_checkstack(L, 1 + 3 + argsCount)) {
+		LOG_L(L_WARNING, "[%s::%s] lua_checkstack() error: %s", GetName().c_str(), __func__, name.GetString());
+		lua_settop(L, top);
+		return;
+	}
+
+	if (!name.GetGlobalFunc(L)) {
+		LOG_L(L_WARNING, "[%s::%s] missing function: %s", GetName().c_str(), __func__, name.GetString());
+		lua_settop(L, top);
+		return;
+	}
+
+	// count can be smaller because of LOS when unsynced
+	lua_createtable(L, callins.size(), 0);
+
+	int i = 0;
+	for(auto& callin: callins) {
+		// TODO check if unit still alive
+		if (!synced && !LuaUtils::IsUnitInLos(L, callin.unit))
+			continue;
+
+		lua_createtable(L, callin.argCount+1, 0);
+
+		for (int a = 0; a < callin.argCount; a++) {
+			lua_pushnumber(L, callin.luaArgs[a]);
+			lua_rawseti(L, -2, a + 1);
+		}
+
+		lua_rawseti(L, -2, ++i);
+	}
+
+	// call the routine
+	callDepth++;
+
+	const bool error = !RunCallIn(L, name, 1 + argsCount, LUA_MULTRET);
+
+	callDepth--;
+
+	lua_settop(L, top);
 }
 
 /******************************************************************************/

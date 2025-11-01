@@ -17,8 +17,6 @@
 #include "CommandAI/FactoryCAI.h"
 #include "CommandAI/AirCAI.h"
 #include "CommandAI/BuilderCAI.h"
-#include "CommandAI/CommandAI.h"
-#include "CommandAI/FactoryCAI.h"
 #include "CommandAI/MobileCAI.h"
 #include "CommandAI/BuilderCaches.h"
 
@@ -33,6 +31,8 @@
 #include "Map/ReadMap.h"
 
 #include "Rendering/GroundFlash.h"
+#include "Rendering/Units/UnitDrawer.h"
+#include "Rendering/Models/3DModel.hpp"
 
 #include "Game/UI/Groups/Group.h"
 #include "Game/UI/Groups/GroupHandler.h"
@@ -111,7 +111,7 @@ CUnit::~CUnit()
 	//   and the CreateWreckage() call to be as low as possible to prevent
 	//   position discontinuities
 	if (delayedWreckLevel >= 0)
-		featureHandler.CreateWreckage({this, unitDef, featureDefHandler->GetFeatureDefByID(featureDefID),  {}, {},  -1, team, -1,  heading, buildFacing,  delayedWreckLevel - 1, 1});
+		CreateWreck(delayedWreckLevel - 1, 1);
 
 	if (deathExpDamages != nullptr)
 		DynDamageArray::DecRef(deathExpDamages);
@@ -148,6 +148,12 @@ CUnit::~CUnit()
 }
 
 
+CFeature* CUnit::CreateWreck(int wreckLevel, int smokeTime)
+{
+	return featureHandler.CreateWreckage({this, unitDef, featureDefHandler->GetFeatureDefByID(featureDefID),  {}, {},  -1, team, -1,  heading, buildFacing,  wreckLevel, smokeTime});
+}
+
+
 void CUnit::InitStatic()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
@@ -169,7 +175,7 @@ void CUnit::SanityCheck() const
 	pos.AssertNaNs();
 	midPos.AssertNaNs();
 	relMidPos.AssertNaNs();
-	preFramePos.AssertNaNs();
+	preFrameTra.AssertNaNs();
 
 	speed.AssertNaNs();
 
@@ -185,10 +191,24 @@ void CUnit::SanityCheck() const
 	}
 }
 
+void CUnit::UpdatePrevFrameTransform()
+{
+	for (auto& lmp : localModel.pieces) {
+		lmp.SavePrevModelSpaceTransform();
+	}
+
+	if (!prevFrameNeedsUpdate)
+		return;
+
+	preFrameTra = Transform{ CQuaternion::MakeFrom(GetTransformMatrix(true)), pos };
+	prevFrameNeedsUpdate = false;
+}
+
 
 void CUnit::PreInit(const UnitLoadParams& params)
 {
 	ZoneScoped;
+
 	// if this is < 0, UnitHandler will give us a random ID
 	id = params.unitID;
 	featureDefID = -1;
@@ -238,7 +258,7 @@ void CUnit::PreInit(const UnitLoadParams& params)
 	upright  = unitDef->upright;
 
 	SetVelocity(params.speed);
-	Move(preFramePos = params.pos.cClampInMap(), false);
+	Move(params.pos.cClampInMap(), false);
 
 	UpdateDirVectors(!upright && IsOnGround(), false, 0.0f);
 	SetMidAndAimPos(model->relMidPos, model->relMidPos, true);
@@ -289,6 +309,8 @@ void CUnit::PreInit(const UnitLoadParams& params)
 	wantCloak |= unitDef->startCloaked;
 	decloakDistance = unitDef->decloakDistance;
 
+	leavesGhost = gameSetup->ghostedBuildings && unitDef->leavesGhost;
+
 	flankingBonusMode        = unitDef->flankingBonusMode;
 	flankingBonusDir         = unitDef->flankingBonusDir;
 	flankingBonusMobility    = unitDef->flankingBonusMobilityAdd * 1000;
@@ -321,14 +343,9 @@ void CUnit::PostInit(const CUnit* builder)
 	// does nothing for LUS, calls Create+SetMaxReloadTime for COB
 	script->Create();
 
-	// all units are blocking (ie. register on the blocking-map
-	// when not flying) except mines, since their position would
-	// be given away otherwise by the PF, etc.
-	// NOTE: this does mean that mines can be stacked indefinitely
-	// (an extra yardmap character would be needed to prevent this)
 	immobile = unitDef->IsImmobileUnit();
 
-	UpdateCollidableStateBit(CSolidObject::CSTATE_BIT_SOLIDOBJECTS, unitDef->collidable && (!immobile || !unitDef->canKamikaze));
+	UpdateCollidableStateBit(CSolidObject::CSTATE_BIT_SOLIDOBJECTS, unitDef->collidable);
 	Block();
 
 	// done once again in UnitFinished() too
@@ -373,6 +390,7 @@ void CUnit::PostInit(const CUnit* builder)
 		commandAI->GiveCommand(Command(CMD_FIRE_STATE, 0, fireState));
 	}
 
+	UpdateRenderParams();
 	eventHandler.RenderUnitPreCreated(this);
 
 	// Lua might call SetUnitHealth within UnitCreated
@@ -394,6 +412,7 @@ void CUnit::PostInit(const CUnit* builder)
 void CUnit::PostLoad()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
+	UpdateRenderParams();
 	eventHandler.RenderUnitPreCreated(this);
 	eventHandler.RenderUnitCreated(this, isCloaked);
 }
@@ -500,8 +519,7 @@ void CUnit::ForcedKillUnit(CUnit* attacker, bool selfDestruct, bool reclaimed, i
 			.damages              = *da,
 			.weaponDef            = wd,
 			.owner                = this,
-			.hitUnit              = nullptr,
-			.hitFeature           = nullptr,
+			.hitObject            = ExplosionHitObject(),
 			.craterAreaOfEffect   = da->craterAreaOfEffect,
 			.damageAreaOfEffect   = da->damageAreaOfEffect,
 			.edgeEffectiveness    = da->edgeEffectiveness,
@@ -528,13 +546,22 @@ void CUnit::ForcedMove(const float3& newPos)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	UnBlock();
-	Move((preFramePos = newPos) - pos, true);
+	Move(newPos - pos, true);
 	Block();
 
 	eventHandler.UnitMoved(this);
 	quadField.MovedUnit(this);
 }
 
+
+void CUnit::SetLeavesGhost(bool newLeavesGhost, bool leaveDeadGhost)
+{
+	bool prevValue = leavesGhost;
+	leavesGhost = newLeavesGhost;
+
+	if (prevValue != newLeavesGhost)
+		unitDrawer->UnitLeavesGhostChanged(this, leaveDeadGhost);
+}
 
 
 float3 CUnit::GetErrorVector(int argAllyTeam) const
@@ -548,7 +575,7 @@ float3 CUnit::GetErrorVector(int argAllyTeam) const
 	const int atSightMask = losStatus[argAllyTeam];
 
 	const int isVisible = 2 * ((atSightMask & LOS_INLOS  ) != 0 ||                  teamHandler.Ally(argAllyTeam, allyteam)); // in LOS or allied, no error
-	const int seenGhost = 4 * ((atSightMask & LOS_PREVLOS) != 0 && gameSetup->ghostedBuildings && unitDef->IsBuildingUnit()); // seen ghosted building, no error
+	const int seenGhost = 4 * ((atSightMask & LOS_PREVLOS) != 0 && leavesGhost); // seen ghosted immobiles, no error
 	const int isOnRadar = 8 * ((atSightMask & LOS_INRADAR) != 0                                                            ); // current radar contact
 
 	float errorMult = 0.0f;
@@ -655,7 +682,6 @@ void CUnit::Update()
 
 	UpdatePhysicalState(0.1f);
 	UpdatePosErrorParams(true, false);
-	UpdateTransportees(); // none if already dead
 
 	if (beingBuilt)
 		return;
@@ -722,7 +748,7 @@ void CUnit::UpdateTransportees()
 			// slave transportee orientation to piece
 			if (tu.piece >= 0) {
 				const CMatrix44f& transMat = GetTransformMatrix(true);
-				const CMatrix44f& pieceMat = script->GetPieceMatrix(tu.piece);
+				const auto pieceMat = script->GetPieceMatrix(tu.piece);
 
 				transportee->SetDirVectors(transMat * pieceMat);
 			}
@@ -1929,6 +1955,11 @@ bool CUnit::SetGroup(CGroup* newGroup, bool fromFactory, bool autoSelect)
 const CGroup* CUnit::GetGroup() const { return uiGroupHandlers[team].GetUnitGroup(id); }
       CGroup* CUnit::GetGroup()       { return uiGroupHandlers[team].GetUnitGroup(id); }
 
+void CUnit::UpdateRenderParams()
+{
+	definedIconName = unitDef->iconName;
+}
+
 
 /******************************************************************************/
 /******************************************************************************/
@@ -2039,10 +2070,13 @@ bool CUnit::AddBuildPower(CUnit* builder, float amount)
 		restTime = 0;
 
 		bool killMe = false;
+
 		SResourceOrder order;
 		order.quantum    = false;
 		order.overflow   = true;
 		order.use.energy = -energyRefundStepScaled;
+		order.useIncomeMultiplier = false; // Dont apply income bonus to reclaimed units
+		
 		if (modInfo.reclaimUnitMethod == 0) {
 			// gradual reclamation of invested metal
 			order.add.metal = -metalRefundStepScaled;
@@ -2323,7 +2357,7 @@ bool CUnit::IssueResourceOrder(SResourceOrder* order)
 	// add
 	if (!order->add.empty()) {
 		if (harvestStorage.empty()) {
-			AddResources(order->add);
+			AddResources(order->add, order->useIncomeMultiplier);
 		} else {
 			bool isFull = false;
 			for (int i = 0; i < SResourcePack::MAX_RESOURCES; ++i) {
@@ -2936,7 +2970,6 @@ CR_REG_METADATA(CUnit, (
 	CR_MEMBER(maxRange),
 	CR_MEMBER(lastMuzzleFlameSize),
 
-	CR_MEMBER(preFramePos),
 	CR_MEMBER(lastMuzzleFlameDir),
 	CR_MEMBER(flankingBonusDir),
 
@@ -3011,12 +3044,15 @@ CR_REG_METADATA(CUnit, (
 	CR_MEMBER(isCloaked),
 	CR_MEMBER(decloakDistance),
 
+	CR_MEMBER(leavesGhost),
+
 	CR_MEMBER(lastTerrainType),
 	CR_MEMBER(curTerrainType),
 
 	CR_MEMBER(selfDCountdown),
 
-	CR_MEMBER_UN(myIcon),
+	CR_MEMBER(definedIconName),
+	CR_MEMBER_UN(currentIconIndex),
 	CR_MEMBER_UN(drawIcon),
 
 	CR_MEMBER(transportedUnits),

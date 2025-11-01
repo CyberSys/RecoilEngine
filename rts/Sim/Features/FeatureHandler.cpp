@@ -24,7 +24,8 @@ CR_REG_METADATA(CFeatureHandler, (
 	CR_MEMBER(deletedFeatureIDs),
 	CR_MEMBER(activeFeatureIDs),
 	CR_MEMBER(features),
-	CR_MEMBER(updateFeatures)
+	CR_MEMBER(updateFeatures),
+	CR_MEMBER(featuresJustAdded)
 ))
 
 /******************************************************************************/
@@ -55,6 +56,7 @@ void CFeatureHandler::Kill() {
 	featureMemPool.clear();
 
 	activeFeatureIDs.clear();
+	featuresJustAdded.clear();
 	deletedFeatureIDs.clear();
 	features.clear();
 	updateFeatures.clear();
@@ -128,6 +130,7 @@ void CFeatureHandler::InsertActiveFeature(CFeature* feature)
 	assert(features[feature->id] == nullptr);
 
 	activeFeatureIDs.insert(feature->id);
+	featuresJustAdded.emplace_back(feature);
 	features[feature->id] = feature;
 }
 
@@ -185,7 +188,27 @@ CFeature* CFeatureHandler::CreateWreckage(const FeatureLoadParams& cparams)
 	return (LoadFeature(params));
 }
 
+void CFeatureHandler::UpdatePreFrame()
+{
+	SCOPED_TIMER("Sim::Features::UpdatePreFrame");
 
+	for (auto* feature : features) {
+		if (!feature) // sucks, but w/e
+			continue;
+
+		feature->UpdatePrevFrameTransform();
+	}
+}
+
+void CFeatureHandler::UpdatePostFrame()
+{
+	SCOPED_TIMER("Sim::Features::UpdatePostFrame");
+
+	for (auto* feature : featuresJustAdded) {
+		feature->UpdatePrevFrameTransform();
+	}
+	featuresJustAdded.clear();
+}
 
 void CFeatureHandler::Update()
 {
@@ -236,6 +259,7 @@ bool CFeatureHandler::UpdateFeature(CFeature* feature)
 
 		deletedFeatureIDs.push_back(feature->id);
 		activeFeatureIDs.erase(feature->id);
+		spring::VectorErase(featuresJustAdded, feature);
 
 		features[feature->id] = nullptr;
 

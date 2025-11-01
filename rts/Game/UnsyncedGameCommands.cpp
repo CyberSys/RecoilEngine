@@ -1159,7 +1159,7 @@ public:
 	SpecFullViewActionExecutor() : IUnsyncedActionExecutor(
 		"SpecFullView",
 		"Sets or toggles LOS settings if the local user is a spectator. Fullview: See everything, otherwise visibility is determined by the current team. Fullselect: Whether all units can be selected",
-		false, 
+		false,
 		{
 			{"", "Toggles both Fullview and Fullselect from current values"},
 			{"0", "Not Fullview, Not Fullselect"},
@@ -1259,9 +1259,9 @@ public:
 	GroupActionExecutor() : IUnsyncedActionExecutor("Group", "Manage control groups", false, {
 			{"<n>", "Select group <n>, also focuses on second call (deprecated)"},
 			{"select <n>", "Select group <n>"},
-			{"focus <n>", "Focus camera on group <n>"},
+			{"focus <n> [smoothness]", "Focus camera on group <n> with optional camera smoothness"},
 			{"set <n>", "Set current selected units as group <n>"},
-			{"add <n>", "Add current selected units to group <n>"},
+			{"add <n>", "Add current selected units to group <n> (does not change selection)"},
 			{"unset", "Deassign control group for currently selected units"},
 			{"selectadd <n>", "Add members from group <n> to currently selected units"},
 			{"selectclear <n>", "Remove members from group <n> from currently selected units"},
@@ -1296,6 +1296,7 @@ public:
 				groupId = StringToInt(args[0], &parseFailure);
 				break;
 			case 2:
+			case 3: // NOTE: Right now GroupCommand's longest command only has 3 args
 				subCommand = args[0];
 				groupId = StringToInt(args[1], &parseFailure);
 				break;
@@ -1310,9 +1311,14 @@ public:
 		if (groupId < 0 || groupId > 9)
 			return WrongSyntax("groupId must be single digit number");
 
+		// NOTE: This only works with group commands that take exactly 1 required argument
+		std::vector<std::string> extraArgs = {};
+		for (int i = 2; i < args.size(); i++)
+			extraArgs.push_back(args[i]);
+
 		// Finally, actually run the command.
 		bool error;
-		const bool halt = uiGroupHandlers[gu->myTeam].GroupCommand(groupId, subCommand, error);
+		const bool halt = uiGroupHandlers[gu->myTeam].GroupCommand(groupId, subCommand, extraArgs, error);
 
 		if (error)
 			return WrongSyntax("subcommand " + subCommand + " not found");
@@ -2130,31 +2136,48 @@ public:
 	}
 };
 
-class ShowElevationActionExecutor : public IUnsyncedActionExecutor {
+class IShowInfoTexActionExecutor : public IUnsyncedActionExecutor {
 public:
-	ShowElevationActionExecutor() : IUnsyncedActionExecutor("ShowElevation", "Enable rendering of the auxiliary height-map overlay") {
+	IShowInfoTexActionExecutor(const std::string& command, const std::string& description, bool cheatRequired = false) : IUnsyncedActionExecutor(command, description, cheatRequired) {
 	}
+	bool SetMode(const UnsyncedAction& action, const std::string mode, const std::string value) const {
+		const bool wasEnabled = infoTextureHandler->GetMode() == mode;
+		bool enabled = wasEnabled;
 
-	bool Execute(const UnsyncedAction& action) const final {
-		infoTextureHandler->ToggleMode("height");
+		InverseOrSetBool(enabled, value);
+
+		if (enabled && !wasEnabled)
+			infoTextureHandler->SetMode(mode);
+		else if (!enabled && wasEnabled)
+			infoTextureHandler->DisableCurrentMode();
+
 		return true;
 	}
 };
 
-class ShowMetalMapActionExecutor : public IUnsyncedActionExecutor {
+class ShowElevationActionExecutor : public IShowInfoTexActionExecutor {
 public:
-	ShowMetalMapActionExecutor() : IUnsyncedActionExecutor("ShowMetalMap", "Enable rendering of the auxiliary metal-map overlay") {
+	ShowElevationActionExecutor() : IShowInfoTexActionExecutor("ShowElevation", "Enable rendering of the auxiliary height-map overlay") {
 	}
 
 	bool Execute(const UnsyncedAction& action) const final {
-		infoTextureHandler->ToggleMode("metal");
-		return true;
+		return SetMode(action, "height", action.GetArgs());
 	}
 };
 
-class ShowPathTravActionExecutor : public IUnsyncedActionExecutor {
+class ShowMetalMapActionExecutor : public IShowInfoTexActionExecutor {
 public:
-	ShowPathTravActionExecutor() : IUnsyncedActionExecutor("ShowPathTraversability", "Enable rendering of the path traversability-map overlay") {
+	ShowMetalMapActionExecutor() : IShowInfoTexActionExecutor("ShowMetalMap", "Enable rendering of the auxiliary metal-map overlay") {
+	}
+
+	bool Execute(const UnsyncedAction& action) const final {
+		return SetMode(action, "metal", action.GetArgs());
+	}
+};
+
+class ShowPathTravActionExecutor : public IShowInfoTexActionExecutor {
+public:
+	ShowPathTravActionExecutor() : IShowInfoTexActionExecutor("ShowPathTraversability", "Enable rendering of the path traversability-map overlay") {
 	}
 
 	bool Execute(const UnsyncedAction& action) const final {
@@ -2163,47 +2186,88 @@ public:
 		if (pathTexInfo != nullptr)
 			pathTexInfo->ShowMoveDef(-1);
 
-		infoTextureHandler->ToggleMode("path");
-		return true;
+		return SetMode(action, "path", action.GetArgs());
 	}
 };
 
-class ShowPathHeatActionExecutor : public IUnsyncedActionExecutor {
+class ShowPathHeatActionExecutor : public IShowInfoTexActionExecutor {
 public:
-	ShowPathHeatActionExecutor() : IUnsyncedActionExecutor("ShowPathHeat", "Enable/Disable rendering of the path heat-map overlay", true) {
+	ShowPathHeatActionExecutor() : IShowInfoTexActionExecutor("ShowPathHeat", "Enable/Disable rendering of the path heat-map overlay", true) {
 	}
 
 	bool Execute(const UnsyncedAction& action) const final {
-		infoTextureHandler->ToggleMode("heat");
-		return true;
+		return SetMode(action, "heat", action.GetArgs());
 	}
 };
 
-class ShowPathFlowActionExecutor : public IUnsyncedActionExecutor {
+class ShowPathFlowActionExecutor : public IShowInfoTexActionExecutor {
 public:
-	ShowPathFlowActionExecutor() : IUnsyncedActionExecutor("ShowPathFlow", "Enable/Disable rendering of the path flow-map overlay", true) {
+	ShowPathFlowActionExecutor() : IShowInfoTexActionExecutor("ShowPathFlow", "Enable/Disable rendering of the path flow-map overlay", true) {
 	}
 
 	bool Execute(const UnsyncedAction& action) const final {
-		infoTextureHandler->ToggleMode("flow");
-		return true;
+		return SetMode(action, "flow", action.GetArgs());
 	}
 };
 
-class ShowPathCostActionExecutor : public IUnsyncedActionExecutor {
+class ShowPathCostActionExecutor : public IShowInfoTexActionExecutor {
 public:
-	ShowPathCostActionExecutor() : IUnsyncedActionExecutor("ShowPathCost", "Enable rendering of the path cost-map overlay", true) {
+	ShowPathCostActionExecutor() : IShowInfoTexActionExecutor("ShowPathCost", "Enable rendering of the path cost-map overlay", true) {
 	}
 
 	bool Execute(const UnsyncedAction& action) const final {
-		infoTextureHandler->ToggleMode("pathcost");
-		return true;
+		return SetMode(action, "pathcost", action.GetArgs());
 	}
 };
 
-class ToggleLOSActionExecutor : public IUnsyncedActionExecutor {
+class ShowLOSActionExecutor : public IShowInfoTexActionExecutor {
 public:
-	ToggleLOSActionExecutor() : IUnsyncedActionExecutor("ToggleLOS", "Enable rendering of the auxiliary LOS-map overlay") {
+	ShowLOSActionExecutor() : IShowInfoTexActionExecutor("ShowLOS", "Enable rendering of the auxiliary LOS-map overlay") {
+	}
+
+	bool Execute(const UnsyncedAction& action) const final {
+		return SetMode(action, "los", action.GetArgs());
+	}
+};
+
+class ShowInfoTexActionExecutor : public IShowInfoTexActionExecutor {
+public:
+	ShowInfoTexActionExecutor() : IShowInfoTexActionExecutor("ShowInfoTex", "Enable rendering of an arbitrary info texture view", true) {
+	}
+
+	bool CommandError(const std::string description, bool showHint, bool showModes) const {
+		LOG_L(L_WARNING, "/%s error: %s", GetCommand().c_str(), description.c_str());
+
+		if (showHint)
+			LOG("usage:   /%s <mode> [on/off/1/0]", GetCommand().c_str());
+
+		if (showModes) {
+			std::stringstream ss;
+			const auto allModes = infoTextureHandler->GetModes();
+			for (auto it = allModes.begin(); it != allModes.end(); it++)
+				ss << *it << (it + 1 == allModes.end() ? "" : ", ");
+			LOG("modes:   %s", ss.str().c_str());
+		}
+
+		return true;
+	}
+
+	bool Execute(const UnsyncedAction& action) const final {
+		const auto args = CSimpleParser::Tokenize(action.GetArgs());
+		if (args.size() < 1)
+			return CommandError("missing mandatory argument \"mode\"", true, true);
+
+		const auto& mode = args[0];
+		if (infoTextureHandler->HasMode(mode))
+			return SetMode(action, mode, args.size() > 1 ? args[1] : "");
+		else
+			return CommandError(std::format("infotex mode does not exist '{}'", mode), false, true);
+	}
+};
+
+class ToggleLOSActionExecutor : public IShowInfoTexActionExecutor {
+public:
+	ToggleLOSActionExecutor() : IShowInfoTexActionExecutor("ToggleLOS", "Toggle rendering of the auxiliary LOS-map overlay") {
 	}
 
 	bool Execute(const UnsyncedAction& action) const final {
@@ -2905,7 +2969,24 @@ public:
 
 class MiniMapActionExecutor : public IUnsyncedActionExecutor {
 public:
-	MiniMapActionExecutor() : IUnsyncedActionExecutor("MiniMap", "FIXME document subcommands") {
+	MiniMapActionExecutor() : IUnsyncedActionExecutor("MiniMap", "Various subcommands to control the minimap", false, {
+			{"fullproxy [0|1]", "Enable (1) or disable (0) full proxy mode. No argument toggles."},
+			{"icons [0|1]", "Enable (1) or disable (0) unit icons. No argument toggles."},
+			{"unitexp <float>", "Set unit size exponent (float)."},
+			{"unitsize <float>", "Set base unit size (float, min 0.0)."},
+			{"drawcommands [<int>]", "Set draw commands level (int >= 0). No argument toggles between 0 and 1."},
+			{"drawprojectiles [0|1]", "Enable (1) or disable (0) drawing projectiles. No argument toggles."},
+			{"drawpings [0|1]", "Enable (1) or disable (0) drawing pings. No argument toggles. Disabling clears pings."},
+			{"simplecolors [0|1]", "Enable (1) or disable (0) simple minimap colors. No argument toggles."},
+			{"geo <geometry>", "Set minimap geometry (not available in dualscreen mode)."},
+			{"geometry <geometry>", "Set minimap geometry (not available in dualscreen mode)."},
+			{"min [0|1]", "Minimize (1) or restore (0) minimap (not available in dualscreen mode). No argument toggles."},
+			{"minimize [0|1]", "Minimize (1) or restore (0) minimap (not available in dualscreen mode). No argument toggles."},
+			{"max [0|1]", "Maximize (1) or restore (0) minimap (not available in dualscreen mode). No argument toggles."},
+			{"maximize [0|1]", "Maximize (1) or restore (0) minimap (not available in dualscreen mode). No argument toggles."},
+			{"maxspect [0|1]", "Maximize (1) or restore (0) minimap with aspect ratio (not available in dualscreen mode). No argument toggles."},
+			{"mouseevents [0|1]", "Enable (1) or disable (0) mouse interaction. No argument toggles."},
+			}) {
 	}
 
 	bool Execute(const UnsyncedAction& action) const final {
@@ -4038,6 +4119,8 @@ void UnsyncedGameCommands::AddDefaultActionExecutors()
 	AddActionExecutor(AllocActionExecutor<ControlUnitActionExecutor>());
 	AddActionExecutor(AllocActionExecutor<ShowStandardActionExecutor>());
 	AddActionExecutor(AllocActionExecutor<ShowElevationActionExecutor>());
+	AddActionExecutor(AllocActionExecutor<ShowInfoTexActionExecutor>());
+	AddActionExecutor(AllocActionExecutor<ShowLOSActionExecutor>());
 	AddActionExecutor(AllocActionExecutor<ShowMetalMapActionExecutor>());
 	AddActionExecutor(AllocActionExecutor<ShowPathTravActionExecutor>());
 	AddActionExecutor(AllocActionExecutor<ShowPathHeatActionExecutor>());
@@ -4160,4 +4243,3 @@ void UnsyncedGameCommands::DestroyInstance(bool reload) {
 	spring::SafeDestruct(singleton);
 	std::memset(ugcSingletonMem, 0, sizeof(ugcSingletonMem));
 }
-

@@ -9,6 +9,7 @@
 #include "LuaConfig.h"
 
 #include "Game/GameVersion.h"
+#include "Rendering/Models/3DModel.hpp"
 #include "Rendering/Models/IModelParser.h"
 #include "Sim/Projectiles/Projectile.h"
 #include "Sim/Features/Feature.h"
@@ -935,6 +936,7 @@ void LuaUtils::PushCommandParamsTable(lua_State* L, const Command& cmd, bool sub
  * when creating a command from Lua.
  * 
  * @class CommandOptions
+ * @x_helper
  * @field coded CommandOptionBit|integer Bitmask of command options.
  * @field alt boolean Alt key pressed.
  * @field ctrl boolean Ctrl key pressed.
@@ -1108,7 +1110,7 @@ static bool ParseCommandTimeOut(
  * @param cmdID CMD|integer The command ID.
  * @param params CreateCommandParams? Parameters for the given command.
  * @param options CreateCommandOptions?
- * @param timeout integer?
+ * @param timeout integer? Absolute frame number. The command will be discarded after this frame. Only respected by mobile units.
  */
 Command LuaUtils::ParseCommand(lua_State* L, const char* caller, int idIndex)
 {
@@ -1152,6 +1154,7 @@ Command LuaUtils::ParseCommand(lua_State* L, const char* caller, int idIndex)
  * Used when assigning multiple commands at once.
  * 
  * @class CreateCommand
+ * @x_helper
  * @field [1] CMD|integer Command ID.
  * @field [2] CreateCommandParams? Parameters for the given command.
  * @field [3] CreateCommandOptions? Command options.
@@ -1567,12 +1570,10 @@ void LuaUtils::PushStringVector(lua_State* L, const vector<string>& vec)
 /******************************************************************************/
 /******************************************************************************/
 
-/***
- * Command Description
- * 
- * Contains data about a command.
+/*** Contains data about a command.
  * 
  * @class CommandDescription
+ * @x_helper
  * @field id (CMD|integer)?
  * @field type CMDTYPE?
  * @field name string?

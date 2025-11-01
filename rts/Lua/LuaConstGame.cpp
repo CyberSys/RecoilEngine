@@ -22,12 +22,17 @@
 #include "System/FileSystem/ArchiveScanner.h"
 #include "System/FileSystem/FileSystem.h"
 #include "System/StringUtil.h"
+#include "Rendering/Fonts/FontHandler.h"
 
 /******************************************************************************
  * Game constants
  * @see rts/Lua/LuaConstGame.cpp
 ******************************************************************************/
 
+/* TODO:
+ * - Inline these declarations (place each above the specific line they are pushed into the constant.
+ * - There are many missing (for example modInfo related ones)
+ */
 /*** Game specific information
  *
  * @table Game
@@ -215,6 +220,8 @@ bool LuaConstGame::PushEntries(lua_State* L)
 		LuaPushNamedNumber(L, "paralyzeDeclineRate", modInfo.paralyzeDeclineRate);
 
 		LuaPushNamedBool  (L, "allowEnginePlayerlist", modInfo.allowEnginePlayerlist);
+		/*** @field Game.nativeExcessSharing boolean whether the engine handles excess resources overflow */
+		LuaPushNamedBool  (L, "nativeExcessSharing", modInfo.nativeExcessSharing);
 	}
 
 	if (archiveScanner != nullptr && mapInfo != nullptr) {
@@ -325,10 +332,12 @@ bool LuaConstGame::PushEntries(lua_State* L)
 	}
 	{
 		// inline color-codes for text fonts
+		bool newIndicators = fontHandler.disableOldColorIndicators;
+
 		lua_pushliteral(L, "textColorCodes");
 		lua_createtable(L, 0, 3);
-			LuaPushNamedChar(L, "Color"          , static_cast<char>(CglFont::ColorCodeIndicator)  );
-			LuaPushNamedChar(L, "ColorAndOutline", static_cast<char>(CglFont::ColorCodeIndicatorEx));
+			LuaPushNamedChar(L, "Color"          , static_cast<char>(newIndicators ? CglFont::ColorCodeIndicator : CglFont::OldColorCodeIndicator)  );
+			LuaPushNamedChar(L, "ColorAndOutline", static_cast<char>(newIndicators ? CglFont::ColorCodeIndicatorEx : CglFont::OldColorCodeIndicatorEx));
 			LuaPushNamedChar(L, "Reset"          , static_cast<char>(CglFont::ColorResetIndicator) );
 		lua_rawset(L, -3);
 	}

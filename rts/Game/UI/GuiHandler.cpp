@@ -175,8 +175,11 @@ bool CGuiHandler::EnableLuaUI(bool enableCommand)
 		}
 	}
 
-	RmlGui::Reload();
-	CLuaUI::ReloadHandler();
+	LOG_L(L_NOTICE, "[GUIHandler] Reloading LuaUI/RmlGui");
+	CLuaUI::FreeHandler();
+	RmlGui::Shutdown();
+	//CLuaUI load also initialises RmlGui
+	CLuaUI::LoadFreeHandler();
 
 	if (luaUI != nullptr) {
 		LayoutIcons(false);
@@ -1881,7 +1884,7 @@ bool CGuiHandler::KeyPressed(int keyCode, int scanCode, bool isRepeat)
 		}
 	}
 
-	const ActionList& al = game->lastActionList;
+	const ActionList& al = game->GetLastActionList();
 	for (int ali = 0; ali < (int)al.size(); ++ali) {
 		const int actionIndex = (ali + tmpActionOffset) % (int)al.size(); //????
 		const Action& action = al[actionIndex];
@@ -2772,7 +2775,7 @@ static inline bool BindUnitTexByString(const std::string& str)
 	return true;
 }
 
-
+/*
 static inline bool BindIconTexByString(const std::string& str)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
@@ -2790,6 +2793,18 @@ static inline bool BindIconTexByString(const std::string& str)
 
 	ud->iconType->BindTexture();
 	return true;
+}
+*/
+
+// the archaic code of gui handler was not designed to work with atlased textures
+// like icons are since https://github.com/beyond-all-reason/RecoilEngine/pull/2604 was merged
+// GuiHandler should eventually be replaced by something better,
+// so at the moment I don't feel like fixing it
+// return false and assert instead
+static inline bool BindIconTexByString(const std::string& str)
+{
+	assert(false);
+	return false;
 }
 
 

@@ -214,9 +214,6 @@ public:
 	/// would bring the unit nearer to the goal.
 	float qtRefreshPathMinDist;
 
-	/// Enable to reduce CPU usage, but also reduce quality of resultant paths.
-	bool qtLowerQualityPaths;
-
 	float pfRawDistMult;
 	float pfUpdateRateScale;
 
@@ -233,14 +230,17 @@ public:
 
 	int quadFieldQuadSizeInElmos;
 
+	bool nativeExcessSharing;
 	bool allowTake;
 	bool allowEnginePlayerlist;
 
 	// how often to report wind speed/direction to wind gens
 	int windChangeReportPeriod;
+
+	// If true, players can select their start position by clicking the map
+	bool useStartPositionSelecter;
 };
 
 extern CModInfo modInfo;
 
 #endif // MOD_INFO_H
-

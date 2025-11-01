@@ -14,9 +14,11 @@
 
 #include "LuaConstGame.h"
 #include "LuaConstEngine.h"
+#include "LuaEncoding.h"
 #include "LuaIO.h"
 #include "LuaVFS.h"
 #include "LuaUtils.h"
+#include "LuaMathExtra.h"
 
 #include "Sim/Misc/GlobalSynced.h" // gsRNG
 #include "System/Log/ILog.h"
@@ -141,6 +143,7 @@ void LuaParser::SetupEnv(bool isSyncedCtxt, bool isDefsParser)
 
 	{
 		lua_getglobal(L, "math");
+		LuaMathExtra::PushEntries(L);
 		if (isSyncedCtxt) {
 			LuaPushNamedCFunc(L, "random", Random);
 			LuaPushNamedCFunc(L, "randomseed", RandomSeed);
@@ -157,6 +160,10 @@ void LuaParser::SetupEnv(bool isSyncedCtxt, bool isDefsParser)
 	AddFunc("Echo", LuaUtils::Echo);
 	AddFunc("Log", LuaUtils::Log);
 	AddFunc("TimeCheck", TimeCheck);
+	EndTable();
+
+	GetTable("Encoding");
+	LuaEncoding::PushEntries(L);
 	EndTable();
 
 	GetTable("Script");

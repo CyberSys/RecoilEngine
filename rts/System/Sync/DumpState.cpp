@@ -9,13 +9,15 @@
 #include "fmt/printf.h"
 
 #include "DumpState.h"
+#include "DumpHistory.h"
 
 #include "Game/Game.h"
 #include "Game/GameSetup.h"
 #include "Game/GlobalUnsynced.h"
 #include "Game/GameVersion.h"
 #include "Net/GameServer.h"
-#include "Rendering/Models/3DModel.h"
+#include "Rendering/Models/3DModel.hpp"
+#include "Rendering/Models/3DModelPiece.hpp"
 #include "Rendering/Models/IModelParser.h"
 #include "Sim/Features/Feature.h"
 #include "Sim/Features/FeatureDef.h"
@@ -110,7 +112,7 @@ namespace {
 }
 
 
-void DumpState(int newMinFrameNum, int newMaxFrameNum, int newFramePeriod, std::optional<bool> outputFloats, bool serverRequest)
+void DumpState(int newMinFrameNum, int newMaxFrameNum, int newFramePeriod, std::optional<bool> outputFloats, std::optional<int> historyFrame, bool serverRequest)
 {
 	if (outputFloats.has_value())
 		onlyHash = !outputFloats.value();
@@ -119,6 +121,7 @@ void DumpState(int newMinFrameNum, int newMaxFrameNum, int newFramePeriod, std::
 	static int gMinFrameNum = -1;
 	static int gMaxFrameNum = -1;
 	static int gFramePeriod =  1;
+	static int gHistoryFrame = -1;
 
 	const int oldMinFrameNum = gMinFrameNum;
 	const int oldMaxFrameNum = gMaxFrameNum;
@@ -141,6 +144,8 @@ void DumpState(int newMinFrameNum, int newMaxFrameNum, int newFramePeriod, std::
 			file.flush();
 			file.close();
 		}
+
+		gHistoryFrame = historyFrame.value_or(-1);
 
 		std::string name = (gameServer != nullptr)? "Server": "Client";
 		name += "GameState-";
@@ -288,12 +293,19 @@ void DumpState(int newMinFrameNum, int newMaxFrameNum, int newFramePeriod, std::
 				file << "\t\t\tname: " << p->name << "\n";
 				file << "\t\t\tchildrenNum: " << p->children.size() << "\n";
 				file << "\t\t\tparentName: " << (p->parent ? p->parent->name : "(NULL)") << "\n";
-				file << "\t\t\thasBakedMat: " << p->HasBackedMat() << "\n";
-				file << "\t\t\tbposeMatrix: " << TapFloats(p->bposeMatrix);
-				file << "\t\t\tbakedMatrix: " << TapFloats(p->bakedMatrix);
+				file << "\t\t\thasBakedMat: " << p->HasBackedTra() << "\n";
+				file << "\t\t\tbposeTransform(t): " << TapFloats(p->bposeTransform.t);
+				file << "\t\t\tbposeTransform(r): " << TapFloats(float4{ p->bposeTransform.r.x, p->bposeTransform.r.y, p->bposeTransform.r.z, p->bposeTransform.r.r });
+				file << "\t\t\tbposeTransform(s): " << TapFloats(p->bposeTransform.s);
+				if (p->HasBackedTra()) {
+					const auto bakedTransform = p->bakedTransform.value();
+					file << "\t\t\tbakedTransform(t): " << TapFloats(bakedTransform.t);
+					file << "\t\t\tbakedTransform(r): " << TapFloats(float4{ bakedTransform.r.x, bakedTransform.r.y, bakedTransform.r.z, bakedTransform.r.r });
+					file << "\t\t\tbakedTransform(s): " << TapFloats(bakedTransform.s);
+				}
 				file << "\t\t\toffset: " << TapFloats(p->offset);
 				file << "\t\t\tgoffset: " << TapFloats(p->goffset);
-				file << "\t\t\tscales: " << TapFloats(p->scales);
+				file << "\t\t\tscales: " << TapFloats(p->scale);
 				file << "\t\t\tscales: " << TapFloats(p->mins);
 				file << "\t\t\tscales: " << TapFloats(p->maxs);
 
@@ -651,8 +663,11 @@ void DumpState(int newMinFrameNum, int newMaxFrameNum, int newFramePeriod, std::
 	#endif
 
 	file.flush();
-	if (gs->frameNum == gMaxFrameNum)
+	if (gs->frameNum == gMaxFrameNum) {
+		if (gHistoryFrame > -1)
+			DumpHistory(file, gHistoryFrame, serverRequest);
 		file.close();
+	}
 
 	gMinFrameNum = -1;
 	gMaxFrameNum = -1;
