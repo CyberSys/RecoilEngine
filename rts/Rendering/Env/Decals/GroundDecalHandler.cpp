@@ -299,7 +299,7 @@ void CGroundDecalHandler::AddTexturesFromTable()
 				AddTexToAtlas(mainName, mainTexFileName,  true);
 				AddTexToAtlas(normName, normTexFileName, false);
 
-				maxUniqueScars = atlasTex->GetAllocator()->contains(mainName);
+				maxUniqueScars += atlasTex->GetAllocator()->contains(mainName);
 			}
 		}
 	}
