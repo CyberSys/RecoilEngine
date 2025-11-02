@@ -30,7 +30,6 @@
 #include "System/StringUtil.h"
 
 #include "System/Misc/TracyDefs.h"
-#include <map>
 #include <tracy/TracyLua.hpp>
 
 LuaParser* GetLuaParser(lua_State* L) {

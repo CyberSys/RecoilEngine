@@ -128,7 +128,7 @@ CGroundDecalHandler::CGroundDecalHandler()
 
 	smfDrawer = dynamic_cast<CSMFGroundDrawer*>(readMap->GetGroundDrawer());
 
-	GenerateAtlasTextures();
+	GenerateAtlasTexture();
 	ReloadDecalShaders();
 
 	instVBO = VBO(GL_ARRAY_BUFFER, false, false);
