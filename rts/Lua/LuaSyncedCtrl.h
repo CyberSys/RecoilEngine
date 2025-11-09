@@ -4,6 +4,7 @@
 #define LUA_SYNCED_CTRL_H
 
 struct lua_State;
+class CFeature;
 
 constexpr int MAX_CMD_RECURSION_DEPTH = 16;
 
@@ -32,6 +33,8 @@ class LuaSyncedCtrl
 		inline static bool inOriginalHeightMap = false;
 		inline static bool inSmoothMesh = false;
 
+		static void DestroyFeatureCommon(lua_State* L, CFeature* feature);
+
 	private:
 		// all LuaHandleSynced
 		static int SetAlly(lua_State* L);
@@ -40,6 +43,8 @@ class LuaSyncedCtrl
 		static int AssignPlayerToTeam(lua_State* L);
 		static int GameOver(lua_State* L);
 		static int SetGlobalLos(lua_State* L);
+		static int SetTeamStartPosition(lua_State* L);
+		static int SetPlayerReadyState(lua_State* L);
 
 		static int AddTeamResource(lua_State* L);
 		static int UseTeamResource(lua_State* L);
@@ -67,10 +72,14 @@ class LuaSyncedCtrl
 		static int CreateUnit(lua_State* L);
 		static int DestroyUnit(lua_State* L);
 		static int TransferUnit(lua_State* L);
+		static int TransferTeamMaxUnits(lua_State* L);
 
 		static int CreateFeature(lua_State* L);
 		static int DestroyFeature(lua_State* L);
 		static int TransferFeature(lua_State* L);
+
+		static int CreateUnitWreck(lua_State* L);
+		static int CreateFeatureWreck(lua_State* L);
 
 		static int SetUnitCosts(lua_State* L);
 		static int SetUnitTooltip(lua_State* L);
@@ -136,6 +145,7 @@ class LuaSyncedCtrl
 		static int SetFactoryBuggerOff(lua_State* L);
 		static int BuggerOff(lua_State* L);
 
+		static int AddFeatureDamage(lua_State* L);
 		static int AddUnitDamage(lua_State* L);
 		static int AddUnitImpulse(lua_State* L);
 		static int AddUnitSeismicPing(lua_State* L);
@@ -172,6 +182,9 @@ class LuaSyncedCtrl
 		static int SetFeatureCollisionVolumeData(lua_State* L);
 		static int SetFeaturePieceCollisionVolumeData(lua_State* L);
 		static int SetFeaturePieceVisible(lua_State* L);
+
+		static int SetFeatureFireTime(lua_State* L);
+		static int SetFeatureSmokeTime(lua_State* L);
 
 		static int SetProjectileAlwaysVisible(lua_State* L);
 		static int SetProjectileUseAirLos(lua_State* L);

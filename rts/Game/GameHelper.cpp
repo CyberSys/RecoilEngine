@@ -9,7 +9,6 @@
 #include "Map/Ground.h"
 #include "Map/MapDamage.h"
 #include "Map/ReadMap.h"
-#include "Rendering/Models/3DModel.h"
 #include "Sim/Features/Feature.h"
 #include "Sim/Features/FeatureDef.h"
 #include "Sim/Misc/BuildingMaskMap.h"
@@ -273,9 +272,9 @@ void CGameHelper::Explosion(const CExplosionParams& params) {
 		luaUI->ShockFront(params.pos, weaponDef->cameraShake, damageAOE);
 
 	if (params.impactOnly) {
-		if (params.hitUnit != nullptr) {
+		if (params.hitObject.HasStored<CUnit>()) {
 			DoExplosionDamage(
-				params.hitUnit,
+				params.hitObject.GetTyped<CUnit>(),
 				params.owner,
 				params.pos,
 				0.0f,
@@ -288,9 +287,9 @@ void CGameHelper::Explosion(const CExplosionParams& params) {
 			);
 		}
 
-		if (params.hitFeature != nullptr) {
+		if (params.hitObject.HasStored<CFeature>()) {
 			DoExplosionDamage(
-				params.hitFeature,
+				params.hitObject.GetTyped<CFeature>(),
 				params.owner,
 				params.pos,
 				0.0f,
@@ -327,7 +326,7 @@ void CGameHelper::Explosion(const CExplosionParams& params) {
 			damageAOE,
 			params.gfxMod,
 			params.owner,
-			params.hitUnit
+			params.hitObject
 		);
 	}
 

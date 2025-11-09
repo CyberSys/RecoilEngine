@@ -100,7 +100,7 @@ public:
 				assert(entries.contains(name));
 				auto& myEntry = entries[name];
 				myEntry.texCoords = ae.texCoords;
-				myEntry.pageIdx = static_cast<uint32_t>(i);
+				myEntry.texCoords.pageNum = static_cast<uint32_t>(i);
 			}
 
 			const auto& as = allocator->GetAtlasSize();
@@ -119,6 +119,16 @@ public:
 		}
 
 		return (minLevels == std::numeric_limits<int>::max()) ? 0 : minLevels;
+	}
+
+	int GetReqNumTexLevels() const override
+	{
+		int reqLevels = std::numeric_limits<int>::max();
+		for (auto& allocator : allocators) {
+			reqLevels = std::min(reqLevels, allocator->GetNumTexLevels());
+		}
+
+		return (reqLevels == std::numeric_limits<int>::max()) ? 0 : reqLevels;
 	}
 	uint32_t GetNumPages() const override { return allocators.size(); }
 private:

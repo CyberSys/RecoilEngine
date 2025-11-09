@@ -1635,15 +1635,13 @@ bool CSyncedLuaHandle::FeaturePreDamaged(
  *
  * @function SyncedCallins:ShieldPreDamaged
  *
- * If the weapon is a hitscan type (BeamLaser or LightningCanon) then proID is nil and beamEmitterWeaponNum and beamEmitterUnitID are populated instead.
- *
- * @param projectileID integer
- * @param projectileOwnerID integer
+ * @param projectileID integer `-1` when the weapon type is `BeamLaser` or `LightningCannon`
+ * @param projectileOwnerID integer `-1` when the weapon type is `BeamLaser` or `LightningCannon`
  * @param shieldWeaponNum integer
  * @param shieldCarrierID integer
  * @param bounceProjectile boolean
- * @param beamEmitterWeaponNum integer
- * @param beamEmitterUnitID integer
+ * @param beamEmitterWeaponNum integer? present only when the weapon type is `BeamLaser` or `LightningCannon`
+ * @param beamEmitterUnitID integer? present only when the weapon type is `BeamLaser` or `LightningCannon`
  * @param startX number
  * @param startY number
  * @param startZ number
@@ -2003,7 +2001,7 @@ int CSyncedLuaHandle::SyncedPairs(lua_State* L)
 /***
  * Invoke `UnsyncedCallins:RecvFromSynced` callin with the given arguments.
  * 
- * @function SendToUnsynced
+ * @function SyncedCallins.SendToUnsynced
  *
  * @param ... nil|boolean|number|string|table Arguments. Typically the first argument is the name of a function to call.
  *
@@ -2518,6 +2516,7 @@ string CSplitLuaHandle::LoadFile(const std::string& filename, const std::string&
 
 /***
  * @class CallAsTeamOptions
+ * @x_helper
  * @field ctrl integer Ctrl team ID.
  * @field read integer Read team ID.
  * @field select integer Select team ID.
@@ -2525,14 +2524,14 @@ string CSplitLuaHandle::LoadFile(const std::string& filename, const std::string&
 
 /*** Calls a function from given team's PoV. In particular this makes callouts obey that team's visibility rules.
  *
- * @function CallAsTeam
+ * @function Spring.CallAsTeam
  * @param teamID integer Team ID.
  * @param func fun(...) The function to call.
  * @param ... any Arguments to pass to the function.
  * @return any ... The return values of the function.
  */
 /***
- * @function CallAsTeam
+ * @function Spring.CallAsTeam
  * @param options CallAsTeamOptions Options.
  * @param func fun(...) The function to call.
  * @param ... any Arguments to pass to the function.

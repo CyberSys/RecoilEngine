@@ -2,6 +2,9 @@
 
 #pragma once
 
+#include <array>
+#include <optional>
+
 #include "Decals/GroundDecal.h"
 #include "System/creg/creg.h"
 
@@ -25,13 +28,18 @@ public:
 
 	virtual void Draw() = 0;
 
+	virtual uint32_t GetTexID() const = 0;
+	virtual uint32_t GetTexTarget() const = 0;
+	virtual std::array<uint32_t, 3> GetTexSize() const = 0;
+
 	virtual uint32_t CreateLuaDecal() = 0;
 	virtual bool DeleteLuaDecal(uint32_t id) = 0;
 	virtual       GroundDecal* GetDecalById(uint32_t id)       = 0;
 	virtual const GroundDecal* GetDecalById(uint32_t id) const = 0;
 	virtual bool SetDecalTexture(uint32_t id, const std::string& texName, bool mainTex) = 0;
 	virtual std::string GetDecalTexture(uint32_t id, bool mainTex) const = 0;
-	virtual const std::vector<std::string> GetDecalTextures(bool mainTex) const = 0;
+	virtual const std::vector<std::string> GetDecalTextures(const std::optional<bool>& mainTex = std::nullopt) const = 0;
+	virtual const std::vector<std::string> GetDecalTextureFileNames(const std::vector<std::string>& texList) const = 0;
 	virtual const CSolidObject* GetDecalSolidObjectOwner(uint32_t id) const = 0;
 
 	virtual void SetUnitLeaveTracks(CUnit* unit, bool leaveTracks) = 0;
@@ -64,6 +72,10 @@ public:
 
 	void Draw() override {}
 
+	uint32_t GetTexID() const override { return 0; }
+	uint32_t GetTexTarget() const override { return 0; }
+	std::array<uint32_t, 3> GetTexSize() const override { return std::array<uint32_t, 3>{0}; }
+
 	void AddSolidObject(const CSolidObject* object) override {}
 	void ForceRemoveSolidObject(const CSolidObject* object) override {}
 
@@ -76,7 +88,8 @@ public:
 	const GroundDecal* GetDecalById(uint32_t id) const override { return nullptr; }
 	bool SetDecalTexture(uint32_t id, const std::string& texName, bool mainTex) override { return false; }
 	std::string GetDecalTexture(uint32_t id, bool mainTex) const override { return ""; }
-	const std::vector<std::string> GetDecalTextures(bool mainTex) const override { return {}; }
+	const std::vector<std::string> GetDecalTextures(const std::optional<bool>& mainTex) const override { return {}; }
+	const std::vector<std::string> GetDecalTextureFileNames(const std::vector<std::string>& texList) const override { return {}; }
 	const CSolidObject* GetDecalSolidObjectOwner(uint32_t id) const override { return nullptr; }
 
 	void SetUnitLeaveTracks(CUnit* unit, bool leaveTracks) override;

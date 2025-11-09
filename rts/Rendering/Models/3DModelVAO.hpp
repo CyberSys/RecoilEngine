@@ -3,7 +3,7 @@
 
 #include <memory>
 
-#include "Rendering/Models/3DModel.h"
+#include "Rendering/Models/VertexData.hpp"
 #include "Rendering/GL/myGL.h"
 #include "Rendering/GL/VBO.h"
 #include "Rendering/GL/VAO.h"
@@ -107,7 +107,7 @@ private:
 	void EnableAttribs(bool inst) const;
 	void DisableAttribs() const;
 private:
-	inline static std::unique_ptr<S3DModelVAO> instance = nullptr;
+	static std::unique_ptr<S3DModelVAO> instance;
 private:
 	bool safeToDeleteVectors = false;
 

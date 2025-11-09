@@ -5,19 +5,22 @@ draft = false
 +++
 
 <div style="text-align: center;">
-<h2>Recoil is a battle tested open-source RTS engine that, allied with a flexible Lua API, allows you to implement the perfect UI and mechanics for your game with the ability to support thousands of complex units simultaneously.</h2>
-<h4>Some of the games Recoil powers:</h4>
+<h2 data-notoc="">Recoil is a battle tested open-source RTS engine that, allied with a flexible Lua API, allows you to implement the perfect UI and mechanics for your game with the ability to support thousands of complex units simultaneously.</h2>
+<h4 data-notoc="">Some of the games Recoil powers:</h4>
 </div>
 
-
 {{< cards cols=2 >}}
-  {{< card title="Beyond All Reason" image="showcase/beyond_all_reason.avif" link="https://beyondallreason.info" >}}
-  {{< card title="Zero-K" image="showcase/zk.jpg" link="https://zero-k.info" >}}
+{{< card title="Beyond All Reason" image="showcase/beyond_all_reason.avif" link="https://beyondallreason.info" >}}
+{{< card title="Zero-K" image="showcase/zk.jpg" link="https://zero-k.info" >}}
+{{< /cards >}}
+{{< cards cols=2 >}}
+{{< card title="Metal Factions" image="/showcase/metal_factions.jpg" link="https://metalfactions.pt" >}}
+{{< card title="Total Atomic Power" image="showcase/tap.jpg" link="http://fluidplay.co/index.php/games/tap" >}}
 {{< /cards >}}
 {{< cards >}}
-  {{< card title="Total Atomic Power" image="showcase/tap.jpg" link="http://fluidplay.co/index.php/games/tap" >}}
-  {{< card title="Metal Factions" image="/showcase/metal_factions.jpg" link="https://metalfactions.pt" >}}
-  {{< card title="Tech Annihilation" image="/showcase/ta.jpeg" link="https://github.com/techannihilation/TA" >}}
+{{< card title="Tech Annihilation" image="/showcase/ta.jpeg" link="https://github.com/techannihilation/TA" >}}
+{{< card title="SplinterFaction" image="showcase/splinter_faction.jpg" link="splinterfaction.info" >}}
+{{< card title="Mechcommander: Legacy" image="/showcase/mcl.jpg" link="https://github.com/SpringMCLegacy/SpringMCLegacy/wiki" >}}
 {{< /cards >}}
 
 ---

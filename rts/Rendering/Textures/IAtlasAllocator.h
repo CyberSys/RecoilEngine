@@ -19,18 +19,15 @@ public:
 	struct SAtlasEntry
 	{
 		SAtlasEntry() = default;
-		SAtlasEntry(const int2 _size, std::string _name, void* _data = nullptr)
+		SAtlasEntry(const int2 _size, std::string _name)
 			: size(_size)
 			, name(std::move(_name))
 			, texCoords()
-			, data(_data)
 		{}
 
 		int2 size;
 		std::string name;
 		AtlasedTexture texCoords;
-		uint32_t pageIdx = 0;
-		void* data = nullptr;
 	};
 public:
 	IAtlasAllocator() = default;
@@ -40,14 +37,15 @@ public:
 public:
 	virtual bool Allocate() = 0;
 	virtual int GetNumTexLevels() const = 0;
+	virtual int GetReqNumTexLevels() const = 0;
 	virtual uint32_t GetNumPages() const = 0;
 	void SetMaxTexLevel(int maxLevels) { numLevels = maxLevels; };
 public:
-	void AddEntry(const SAtlasEntry& ae) { AddEntry(ae.name, ae.size, ae.data); }
-	void AddEntry(const std::string& name, int2 size, void* data = nullptr)
+	void AddEntry(const SAtlasEntry& ae) { AddEntry(ae.name, ae.size); }
+	void AddEntry(const std::string& name, const int2& size)
 	{
 		minDim = argmin(minDim, size.x, size.y);
-		entries[name] = SAtlasEntry(size, name, data);
+		entries[name] = SAtlasEntry(size, name);
 	}
 
 	auto FindEntry(const std::string& name) const
@@ -62,20 +60,6 @@ public:
 		return it->second.texCoords;
 	}
 	const auto& GetEntry(const std::string& name) const { return GetEntry(FindEntry(name));	}
-
-	auto GetEntryPage(const spring::unordered_map<std::string, SAtlasEntry>::const_iterator& it) const {
-		if (it == entries.end())
-			return uint32_t(-1);
-
-		return it->second.pageIdx;
-	}
-	auto GetEntryPage(const std::string& name) const { return GetEntryPage(FindEntry(name)); }
-
-	void*& GetEntryData(const std::string& name)
-	{
-		return entries[name].data;
-	}
-
 	const auto& GetEntries() const { return entries; }
 
 	AtlasedTexture GetTexCoords(const spring::unordered_map<std::string, SAtlasEntry>::const_iterator& it)
@@ -83,7 +67,8 @@ public:
 		if (it == entries.end())
 			return AtlasedTexture::DefaultAtlasTexture;
 
-		AtlasedTexture uv(static_cast<float4>(it->second.texCoords), it->second.pageIdx);
+		AtlasedTexture uv = it->second.texCoords;
+
 		uv.x1 /= atlasSize.x;
 		uv.y1 /= atlasSize.y;
 		uv.x2 /= atlasSize.x;

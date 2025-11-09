@@ -5,6 +5,9 @@
 #include <numeric>
 
 #include "3DModelLog.h"
+#include "3DModelDefs.hpp"
+#include "3DModel.hpp"
+#include "3DModelPiece.hpp"
 #include "System/Misc/TracyDefs.h"
 #include "Lua/LuaParser.h"
 
@@ -19,78 +22,118 @@ void Skinning::ReparentMeshesTrianglesToBones(S3DModel* model, const std::vector
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 
-	boneWeights.resize(INV_PIECE_NUM + 1);
-
 	for (const auto& mesh : meshes) {
 		const auto& verts = mesh.verts;
 		const auto& indcs = mesh.indcs;
 
 		for (size_t trID = 0; trID < indcs.size() / 3; ++trID) {
 
-			std::fill(boneWeights.begin(), boneWeights.end(), 0);
+			boneWeights.clear();
 			for (size_t vi = 0; vi < 3; ++vi) {
 				const auto& vert = verts[indcs[trID * 3 + vi]];
 
 				for (size_t wi = 0; wi < 4; ++wi) {
-					boneWeights[GetBoneID(vert, wi)] += vert.boneWeights[wi];
+					const auto bID = GetBoneID(vert, wi);
+					if (bID == INV_PIECE_NUM)
+						continue;
+
+					auto it = std::find_if(boneWeights.begin(), boneWeights.end(), [bID](const auto& p) { return p.first == bID; });
+					if (it == boneWeights.end()) {
+						it = boneWeights.emplace(boneWeights.end(), bID, 0);
+					}
+
+					it->second += vert.boneWeights[wi];
 				}
 			}
 
-			const auto maxWeightedBoneID = std::distance(
-				boneWeights.begin(),
-				std::max_element(boneWeights.begin(), boneWeights.end())
-			);
-			assert(maxWeightedBoneID < INV_PIECE_NUM); // INV_PIECE_NUM - invalid bone
+			std::sort(boneWeights.begin(), boneWeights.end(), [](const auto& lhs, const auto& rhs) {
+				return lhs.second > rhs.second;
+			});
 
-			auto* maxWeightedPiece = model->pieceObjects[maxWeightedBoneID];
+			size_t selectedBoneID = INV_PIECE_NUM;
+			for (auto& [bID, bw] : boneWeights) {
+				bool allVertsHaveBone = true;
+				for (size_t vi = 0; vi < 3; ++vi) {
+					const auto& vert = verts[indcs[trID * 3 + vi]];
+					bool vertHasBone = false;
+					for (size_t wi = 0; wi < 4; ++wi) {
+						if (GetBoneID(vert, wi) == bID) {
+							vertHasBone = true;
+							break;
+						}
+					}
+					allVertsHaveBone &= vertHasBone;
+				}
+				if (allVertsHaveBone) {
+					selectedBoneID = bID;
+					break;
+				}
+			}
 
-			auto& pieceVerts = maxWeightedPiece->GetVerticesVec();
-			auto& pieceIndcs = maxWeightedPiece->GetIndicesVec();
+			if (selectedBoneID == INV_PIECE_NUM)
+				selectedBoneID = boneWeights.begin()->first;
+
+			assert(selectedBoneID < model->pieceObjects.size());
+			auto* selectedPiece = model->pieceObjects[selectedBoneID];
+
+			auto& pieceVerts = selectedPiece->GetVerticesVec();
+			auto& pieceIndcs = selectedPiece->GetIndicesVec();
 
 			for (size_t vi = 0; vi < 3; ++vi) {
 				auto  targVert = verts[indcs[trID * 3 + vi]]; //copy
 
+				// make sure maxWeightedBoneID comes first. It's a must, even if it doesn't exist in targVert.boneIDs!
+				const auto boneID0 = GetBoneID(targVert, 0);
+				if (boneID0 != selectedBoneID) {
+					size_t itPos = 0;
+					for (size_t jj = 1; jj < targVert.boneIDsLow.size(); ++jj) {
+						if (GetBoneID(targVert, jj) == selectedBoneID) {
+							itPos = jj;
+							break;
+						}
+					}
+					if (itPos != 0) {
+						// swap maxWeightedBoneID so it comes first in the boneIDs array
+						std::swap(targVert.boneIDsLow[0], targVert.boneIDsLow[itPos]);
+						std::swap(targVert.boneWeights[0], targVert.boneWeights[itPos]);
+						std::swap(targVert.boneIDsHigh[0], targVert.boneIDsHigh[itPos]);
+					}
+					else {
+						// maxWeightedBoneID doesn't even exist in this targVert
+						// replace the bone with the least weight with maxWeightedBoneID and swap it be first
+						targVert.boneIDsLow[3] = static_cast<uint8_t>((selectedBoneID) & 0xFF);
+						targVert.boneWeights[3] = 0;
+						targVert.boneIDsHigh[3] = static_cast<uint8_t>((selectedBoneID >> 8) & 0xFF);
+						std::swap(targVert.boneIDsLow[0], targVert.boneIDsLow[3]);
+						std::swap(targVert.boneWeights[0], targVert.boneWeights[3]);
+						std::swap(targVert.boneIDsHigh[0], targVert.boneIDsHigh[3]);
+
+						// bad idea as if the big weight was removed from the targVert.boneIDs[3], the rest will get too much of the effect
+						#if 0
+						// renormalize weights (optional but nice for debugging)
+						float sumWeights = 0.0f;
+						for (const auto& bw : targVert.boneWeights) {
+							sumWeights += bw / 255.0f;
+						}
+						for (auto& bw : targVert.boneWeights) {
+							bw = static_cast<uint8_t>(std::clamp(math::round(static_cast<float>(bw) / sumWeights), 0.0f, 255.0f));
+						}
+						#endif
+					}
+				}
+
 				// find if targVert is already added
 				auto itTargVec = std::find_if(pieceVerts.begin(), pieceVerts.end(), [&targVert](const auto& vert) {
-					return targVert.pos.equals(vert.pos) && targVert.normal.equals(vert.normal);
+					return
+						targVert.pos.equals(vert.pos) &&
+						targVert.normal.equals(vert.normal) &&
+						targVert.boneIDsLow == vert.boneIDsLow &&
+						targVert.boneIDsHigh == vert.boneIDsHigh &&
+						targVert.boneWeights == vert.boneWeights;
 				});
 
 				// new vertex
 				if (itTargVec == pieceVerts.end()) {
-					// make sure maxWeightedBoneID comes first. It's a must, even if it doesn't exist in targVert.boneIDs!
-					const auto boneID0 = GetBoneID(targVert, 0);
-					if (boneID0 != maxWeightedBoneID) {
-						size_t itPos = 0;
-						for (size_t jj = 1; jj < targVert.boneIDsLow.size(); ++jj) {
-							if (GetBoneID(targVert, jj) == maxWeightedBoneID) {
-								itPos = jj;
-								break;
-							}
-						}
-						if (itPos != 0) {
-							// swap maxWeightedBoneID so it comes first in the boneIDs array
-							std::swap(targVert.boneIDsLow[0], targVert.boneIDsLow[itPos]);
-							std::swap(targVert.boneWeights[0], targVert.boneWeights[itPos]);
-							std::swap(targVert.boneIDsHigh[0], targVert.boneIDsHigh[itPos]);
-						}
-						else {
-							// maxWeightedBoneID doesn't even exist in this targVert
-							// replace the bone with the least weight with maxWeightedBoneID and swap it be first
-							targVert.boneIDsLow[3]  = static_cast<uint8_t>((maxWeightedBoneID     ) & 0xFF);
-							targVert.boneWeights[3] = 0;
-							targVert.boneIDsHigh[3] = static_cast<uint8_t>((maxWeightedBoneID >> 8) & 0xFF);
-							std::swap(targVert.boneIDsLow[0], targVert.boneIDsLow[3]);
-							std::swap(targVert.boneWeights[0], targVert.boneWeights[3]);
-							std::swap(targVert.boneIDsHigh[0], targVert.boneIDsHigh[3]);
-
-							// renormalize weights (optional but nice for debugging)
-							const float sumWeights = static_cast<float>(std::reduce(targVert.boneWeights.begin(), targVert.boneWeights.end())) / 255.0;
-							for (auto& bw : targVert.boneWeights) {
-								bw = static_cast<uint8_t>(math::round(static_cast<float>(bw) / 255.0f / sumWeights));
-							}
-						}
-					}
-
 					pieceIndcs.emplace_back(static_cast<uint32_t>(pieceVerts.size()));
 					pieceVerts.emplace_back(std::move(targVert));
 				}
@@ -123,24 +166,24 @@ void Skinning::ReparentMeshesTrianglesToBones(S3DModel* model, const std::vector
 void Skinning::ReparentCompleteMeshesToBones(S3DModel* model, const std::vector<SkinnedMesh>& meshes) {
 	RECOIL_DETAILED_TRACY_ZONE;
 
-	boneWeights.resize(INV_PIECE_NUM + 1);
 
 	for (const auto& mesh : meshes) {
 		const auto& verts = mesh.verts;
 		const auto& indcs = mesh.indcs;
 
-		std::fill(boneWeights.begin(), boneWeights.end(), 0);
+		boneWeights.clear();
 		for (const auto& vert : verts) {
 			for (size_t wi = 0; wi < 4; ++wi) {
-				boneWeights[GetBoneID(vert, wi)] += vert.boneWeights[wi];
+				boneWeights[GetBoneID(vert, wi)].second += vert.boneWeights[wi];
 			}
 		}
-		const auto maxWeightedBoneID = std::distance(
-			boneWeights.begin(),
-			std::max_element(boneWeights.begin(), boneWeights.end())
-		);
-		assert(maxWeightedBoneID < INV_PIECE_NUM); // INV_PIECE_NUM - invalid bone
+		std::sort(boneWeights.begin(), boneWeights.end(), [](const auto& lhs, const auto& rhs) {
+			return lhs.second > rhs.second;
+		});
 
+		const auto maxWeightedBoneID = boneWeights.begin()->first;
+
+		assert(maxWeightedBoneID < model->pieceObjects.size());
 		auto* maxWeightedPiece = model->pieceObjects[maxWeightedBoneID];
 
 		auto& pieceVerts = maxWeightedPiece->GetVerticesVec();
@@ -177,11 +220,17 @@ void Skinning::ReparentCompleteMeshesToBones(S3DModel* model, const std::vector<
 					std::swap(targVert.boneWeights[0], targVert.boneWeights[3]);
 					std::swap(targVert.boneIDsHigh[0], targVert.boneIDsHigh[3]);
 
+					// bad idea as if the big weight was removed from the targVert.boneIDs[3], the rest will get too much of the effect
+					#if 0
 					// renormalize weights (optional but nice for debugging)
-					const float sumWeights = static_cast<float>(std::reduce(targVert.boneWeights.begin(), targVert.boneWeights.end())) / 255.0;
-					for (auto& bw : targVert.boneWeights) {
-						bw = static_cast<uint8_t>(math::round(static_cast<float>(bw) / 255.0f / sumWeights));
+					float sumWeights = 0.0f;
+					for (const auto& bw : targVert.boneWeights) {
+						sumWeights += bw / 255.0f;
 					}
+					for (auto& bw : targVert.boneWeights) {
+						bw = static_cast<uint8_t>(std::clamp(math::round(static_cast<float>(bw) / sumWeights), 0.0f, 255.0f));
+					}
+					#endif
 				}
 			}
 
@@ -255,6 +304,9 @@ void ModelUtils::GetModelParams(const LuaTable& modelTable, ModelParams& modelPa
 
 		value = modelTable.Get(key, T{});
 	};
+
+	CondGetLuaValue(modelParams.texs[0], "tex1");
+	CondGetLuaValue(modelParams.texs[1], "tex2");
 
 	CondGetLuaValue(modelParams.mins, "mins");
 	CondGetLuaValue(modelParams.maxs, "maxs");

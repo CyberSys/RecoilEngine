@@ -27,6 +27,8 @@
 #include "Map/ReadMap.h"
 #include "Rendering/Env/GrassDrawer.h"
 #include "Rendering/Models/IModelParser.h"
+#include "Rendering/Models/3DModel.hpp"
+#include "Rendering/Models/3DModelPiece.hpp"
 #include "Sim/Misc/DamageArrayHandler.h"
 #include "Sim/Misc/SideParser.h"
 #include "Sim/Features/Feature.h"
@@ -191,6 +193,8 @@ bool LuaSyncedRead::PushEntries(lua_State* L)
 	REGISTER_LUA_CFUNC(GetFeaturesInRectangle);
 	REGISTER_LUA_CFUNC(GetFeaturesInSphere);
 	REGISTER_LUA_CFUNC(GetFeaturesInCylinder);
+
+	REGISTER_LUA_CFUNC(GetAllProjectiles);
 	REGISTER_LUA_CFUNC(GetProjectilesInRectangle);
 	REGISTER_LUA_CFUNC(GetProjectilesInSphere);
 
@@ -315,6 +319,9 @@ bool LuaSyncedRead::PushEntries(lua_State* L)
 	REGISTER_LUA_CFUNC(GetFeaturePieceCollisionVolumeData);
 	REGISTER_LUA_CFUNC(GetFeatureSeparation);
 
+	REGISTER_LUA_CFUNC(GetFeatureFireTime);
+	REGISTER_LUA_CFUNC(GetFeatureSmokeTime);
+
 	REGISTER_LUA_CFUNC(GetFeatureRulesParam);
 	REGISTER_LUA_CFUNC(GetFeatureRulesParams);
 
@@ -322,7 +329,6 @@ bool LuaSyncedRead::PushEntries(lua_State* L)
 	REGISTER_LUA_CFUNC(GetProjectileDirection);
 	REGISTER_LUA_CFUNC(GetProjectileVelocity);
 	REGISTER_LUA_CFUNC(GetProjectileGravity);
-	REGISTER_LUA_CFUNC(GetPieceProjectileParams);
 	REGISTER_LUA_CFUNC(GetProjectileTarget);
 	REGISTER_LUA_CFUNC(GetProjectileIsIntercepted);
 	REGISTER_LUA_CFUNC(GetProjectileTimeToLive);
@@ -332,6 +338,8 @@ bool LuaSyncedRead::PushEntries(lua_State* L)
 	REGISTER_LUA_CFUNC(GetProjectileType);
 	REGISTER_LUA_CFUNC(GetProjectileDefID);
 	REGISTER_LUA_CFUNC(GetProjectileDamages);
+	REGISTER_LUA_CFUNC(GetPieceProjectileParams);
+	REGISTER_LUA_CFUNC(GetPieceProjectileName);
 
 	REGISTER_LUA_CFUNC(IsPosInMap);
 	REGISTER_LUA_CFUNC(GetWaterPlaneLevel);
@@ -1435,6 +1443,7 @@ int LuaSyncedRead::GetHeadingFromFacing(lua_State* L)
  * Side spec
  *
  * @class SideSpec
+ * @x_helper
  *
  * Returned when getting arrays of side specifications.
  *
@@ -1604,7 +1613,7 @@ int LuaSyncedRead::GetMapStartPositions(lua_State* L)
 		lua_pushnumber(L, pos.x); lua_rawseti(L, -2, 1);
 		lua_pushnumber(L, pos.y); lua_rawseti(L, -2, 2);
 		lua_pushnumber(L, pos.z); lua_rawseti(L, -2, 3);
-		lua_rawseti(L, -2, 1 + teamNum); // [i] = {x,y,z}
+		lua_rawseti(L, -2, teamNum); // [i] = {x,y,z}
 		return true;
 	});
 
@@ -1649,16 +1658,13 @@ int LuaSyncedRead::GetAllyTeamList(lua_State* L)
  */
 int LuaSyncedRead::GetTeamList(lua_State* L)
 {
-	const int args = lua_gettop(L); // number of arguments
-
-	if ((args != 0) && ((args != 1) || !lua_isnumber(L, 1)))
-		luaL_error(L, "Incorrect arguments to GetTeamList([allyTeamID])");
-
-
 	int allyTeamID = -1;
 
-	if (args == 1) {
-		allyTeamID = lua_toint(L, 1);
+	const int args = lua_gettop(L); // number of arguments
+
+	// peek the first argument, but gracefully ignore the rest
+	if (args >= 1) {
+		allyTeamID = luaL_checkinteger(L, 1);
 		if (!teamHandler.IsValidAllyTeam(allyTeamID))
 			return 0;
 	}
@@ -1813,15 +1819,15 @@ int LuaSyncedRead::GetTeamAllyTeamID(lua_State* L)
  * @function Spring.GetTeamResources
  * @param teamID integer
  * @param resource ResourceName
- * @return number? currentLevel
- * @return number storage
- * @return number pull
- * @return number income
- * @return number expense
- * @return number share
- * @return number sent
- * @return number received
- * @return number excess
+ * @return number? currentLevel The current amount of the resource that the team has in storage at this moment
+ * @return number storage       The maximum storage capacity for the resource.
+ * @return number pull          The total amount of the resource that is being requested/used by all units and buildings per second, regardless of whether the resource is actually available.
+ * @return number income        The total amount of the resource being generated per second from all sources (e.g., mines, generators, reclaiming, etc.).
+ * @return number expense       The total amount of the resource actually being spent per second. This is the real consumption, which may be less than pull if there isn’t enough resource available.
+ * @return number share         The fraction (0.0 to 1.0) of the storage that the team is sharing with allied teams. A value of 0.0 means 100% of storage is shared, while 1.0 means only any excess is shared.
+ * @return number sent          The total amount of the resource that has actually been sent to allies (via sharing or manual transfer).
+ * @return number received      The total amount of the resource that has actually been received from allies (via sharing or manual transfer).
+ * @return number excess        The amount of the resource that was lost due to storage overflow (wasted).
  */
 int LuaSyncedRead::GetTeamResources(lua_State* L)
 {
@@ -1984,6 +1990,7 @@ int LuaSyncedRead::GetTeamDamageStats(lua_State* L)
 
 /***
  * @class TeamStats
+ * @x_helper
  * @field time number
  * @field frame number
  * @field metalUsed number
@@ -3255,6 +3262,7 @@ static inline bool UnitInPlanes(const float3& pos, const float radius, const vec
 
 /***
  * @class Plane
+ * @x_helper
  * @field normalVecX number
  * @field normalVecY number
  * @field normalVecZ number
@@ -3643,6 +3651,22 @@ static void GetProjectilesLuaTable(lua_State* L, const std::vector<CProjectile*>
 
 /***
  *
+ * @function Spring.GetAllProjectiles
+ * @param excludeWeaponProjectiles boolean? (Default: `false`)
+ * @param excludePieceProjectiles boolean? (Default: `false`)
+ * @return number[] projectileIDs
+ */
+int LuaSyncedRead::GetAllProjectiles(lua_State* L)
+{
+	const bool excludeWeaponProjectiles = luaL_optboolean(L, 1, false);
+	const bool excludePieceProjectiles  = luaL_optboolean(L, 2, false);
+	const auto& projVec = projectileHandler.GetActiveProjectiles(true).GetData();
+	GetProjectilesLuaTable(L, projVec, excludeWeaponProjectiles, excludePieceProjectiles);
+	return 1;
+}
+
+/***
+ *
  * @function Spring.GetProjectilesInRectangle
  * @param xmin number
  * @param zmin number
@@ -3703,7 +3727,9 @@ int LuaSyncedRead::GetProjectilesInSphere(lua_State* L)
 ******************************************************************************/
 
 
-/***
+/*** Get whether a unitID is valid
+ *
+ * Dead units are not valid.
  *
  * @function Spring.ValidUnitID
  * @param unitID integer
@@ -3718,6 +3744,7 @@ int LuaSyncedRead::ValidUnitID(lua_State* L)
 
 /***
  * @class UnitState
+ * @x_helper
  * @field firestate number
  * @field movestate number
  * @field repeat boolean
@@ -3892,11 +3919,11 @@ int LuaSyncedRead::GetUnitSeismicSignature(lua_State* L)
 	return 1;
 }
 
-/***
+/*** Get whether unit leaves static radar ghosts.
  *
  * @function Spring.GetUnitLeavesGhost
  * @number unitID
- * @treturn nil|number
+ * @return number?
  */
 int LuaSyncedRead::GetUnitLeavesGhost(lua_State* L)
 {
@@ -4311,6 +4338,7 @@ int LuaSyncedRead::GetUnitCosts(lua_State* L)
 
 /***
  * @class ResourceCost
+ * @x_helper
  * @field metal number
  * @field energy number
  */
@@ -5893,6 +5921,7 @@ int LuaSyncedRead::GetUnitFeatureSeparation(lua_State* L)
 
 /***
  * @class UnitDefDimensions
+ * @x_helper
  * @field height number
  * @field radius number
  * @field midx number
@@ -6161,6 +6190,7 @@ int LuaSyncedRead::GetUnitMoveTypeData(lua_State* L)
 
 /***
  * @class Command
+ * @x_helper
  * @field id integer
  * @field params number[]?
  * @field options CommandOptions?
@@ -6545,7 +6575,7 @@ int LuaSyncedRead::GetFactoryCounts(lua_State* L)
  *
  * @param unitID integer
  * @param count 0 Returns the number of commands in the units queue.
- * @return integer The number of commands in the unit queue.
+ * @return integer cmdCount The number of commands in the unit queue.
  *
  */
 
@@ -7111,19 +7141,20 @@ int LuaSyncedRead::GetFeatureResurrect(lua_State* L)
 /***
  *
  * @function Spring.GetFeatureLastAttackedPiece
- * Returns nil if no feature found with ID.
  * @param featureID integer
  * @return string|""|nil Last hit piece name
- * @return integer frame it was last hit on
+ * @return integer? frame it was last hit on, nil when featureID is not valid
  */
 int LuaSyncedRead::GetFeatureLastAttackedPiece(lua_State* L)
 {
 	return (GetSolidObjectLastHitPiece(L, ParseFeature(L, __func__, 1)));
 }
 
-/***
+/*** Parameters related to a collision volume.
+ *
  * @class CollisionVolumeData
- * A collection of information relating to a collision volume.
+ * @x_helper
+ *
  * @field type "ellipsoid"|"cylinder"|"box"|"sphere" type
  * @field scaleX number
  * @field scaleY number
@@ -7162,6 +7193,44 @@ int LuaSyncedRead::GetFeatureCollisionVolumeData(lua_State* L)
 int LuaSyncedRead::GetFeaturePieceCollisionVolumeData(lua_State* L)
 {
 	return (PushPieceCollisionVolumeData(L, ParseFeature(L, __func__, 1)));
+}
+
+
+/*** Get the feature current fire timer.
+ *
+ * @function Spring.GetFeatureFireTime
+ *
+ * @param featureID integer
+ * @return number? fireTime in seconds, nil when featureID is invalid.
+ */
+int LuaSyncedRead::GetFeatureFireTime(lua_State* L)
+{
+	const CFeature* feature = ParseFeature(L, __func__, 1);
+
+	if (feature == nullptr)
+		return 0;
+
+	lua_pushnumber(L, feature->fireTime * INV_GAME_SPEED);
+	return 1;
+}
+
+
+/*** Get the feature current smoke timer.
+ *
+ * @function Spring.GetFeatureSmokeTime
+ *
+ * @param featureID integer
+ * @return number? smokeTime in seconds, nil when featureID is invalid.
+ */
+int LuaSyncedRead::GetFeatureSmokeTime(lua_State* L)
+{
+	const CFeature* feature = ParseFeature(L, __func__, 1);
+
+	if (feature == nullptr)
+		return 0;
+
+	lua_pushnumber(L, feature->smokeTime * INV_GAME_SPEED);
+	return 1;
 }
 
 
@@ -7458,8 +7527,6 @@ int LuaSyncedRead::GetProjectileType(lua_State* L)
  *
  * @function Spring.GetProjectileDefID
  *
- * Using this to get a weaponDefID is HIGHLY preferred to indexing WeaponDefNames via GetProjectileName
- *
  * @param projectileID integer
  * @return number?
  */
@@ -7479,6 +7546,30 @@ int LuaSyncedRead::GetProjectileDefID(lua_State* L)
 		return 0;
 
 	lua_pushnumber(L, wdef->id);
+	return 1;
+}
+
+/*** Returns the name of the model piece from which a piece projectile was spawned. Returns nil for other projectiles including weapons
+ *
+ * @function Spring.GetPieceProjectileName
+ * @param projectileID integer
+ * @return string? pieceName
+ */
+int LuaSyncedRead::GetPieceProjectileName(lua_State* L)
+{
+	const auto* pro = ParseProjectile(L, __func__, 1);
+
+	if (pro == nullptr)
+		return 0;
+
+	if (!pro->piece)
+		return 0;
+
+	const auto* ppro = static_cast <const CPieceProjectile*> (pro);
+	if (ppro == nullptr || ppro->omp == nullptr) // FIXME: assert? neither should happen if pro->piece was true
+		return 0;
+
+	lua_pushsstring(L, ppro->omp->name);
 	return 1;
 }
 
@@ -8198,28 +8289,22 @@ int LuaSyncedRead::IsPosInAirLos(lua_State* L)
 	return 1;
 }
 
-
-/***
+/*** Get unit los state (bitmask)
+ *
  * @function Spring.GetUnitLosState
  * @param unitID integer
  * @param allyTeamID integer?
  * @param raw true Return a bitmask.
- * @return integer? bitmask
- * A bitmask integer, or `nil` if `unitID` is invalid.
- *
- * Bitmask bits:
- * - `1`: `LOS_INLOS` the unit is currently in the los of the allyteam,
- * - `2`: `LOS_INRADAR` the unit is currently in radar from the allyteam,
- * - `4`: `LOS_PREVLOS` the unit has previously been in los from the allyteam,
- * - `8`: `LOS_CONTRADAR` the unit has continuously been in radar since it was last inlos by the allyteam
+ * @return LosMask|integer? bitmask A bitmask of `LosMask` bits
  */
-/***
+
+/*** Get unit los state (table)
+ *
  * @function Spring.GetUnitLosState
  * @param unitID integer
  * @param allyTeamID integer?
- * @param raw false? Return a bitmask.
- * @return { los: boolean, radar: boolean, typed: boolean }? los
- * A table of LOS state, or `nil` if `unitID` is invalid.
+ * @param raw false? Return a table.
+ * @return table<"los"|"radar"|"typed",boolean>? los A table of LOS state names as keys and booleans as values, or `nil` if `unitID` is invalid.
  */
 int LuaSyncedRead::GetUnitLosState(lua_State* L)
 {
@@ -8485,6 +8570,7 @@ static int GetSolidObjectPieceList(lua_State* L, const CSolidObject* o)
 
 /***
  * @class PieceInfo
+ * @x_helper
  * @field name string
  * @field parent string
  * @field children string[] names
