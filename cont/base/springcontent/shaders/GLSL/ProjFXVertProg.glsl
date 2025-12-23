@@ -55,6 +55,7 @@ void main() {
 	float fogDist = length(pos - camPos);
 	fogFactor = (fogParams.y - fogDist) / (fogParams.y - fogParams.x);
 	fogFactor = clamp(fogFactor, 0.0, 1.0);
+	fogFactor = 1.0;
 
 	gl_ClipDistance[0] = dot(vec4(pos, 1.0), clipPlane); //water clip plane
 

@@ -16,6 +16,7 @@
 #include "Rendering/Env/Particles/Classes/SmokeProjectile2.h"
 #include "Rendering/Env/Particles/Classes/SpherePartProjectile.h"
 #include "Rendering/Env/Particles/Classes/TracerProjectile.h"
+#include "Rendering/Env/Particles/Classes/DistortionEffect.hpp"
 #include "Rendering/GL/RenderBuffers.h"
 #include "System/SpringHash.h"
 #include "System/TemplateUtils.hpp"
@@ -157,28 +158,27 @@ CExpGenSpawnable::SpawnableTuple GetSpawnableEntryImpl()
 	);
 }
 
-#define MAKE_FUNCTIONS_TUPLE(Func) \
-std::make_tuple( \
-	Func<CExpGenSpawner        >, \
-	Func<CStandardGroundFlash  >, \
-	Func<CSimpleGroundFlash    >, \
-	Func<CBitmapMuzzleFlame    >, \
-	Func<CDirtProjectile       >, \
-	Func<CExploSpikeProjectile >, \
-	Func<CHeatCloudProjectile  >, \
-	Func<CNanoProjectile       >, \
-	Func<CSimpleParticleSystem >, \
-	Func<CSphereParticleSpawner>, \
-	Func<CSmokeProjectile      >, \
-	Func<CSmokeProjectile2     >, \
-	Func<CSpherePartSpawner    >, \
-	Func<CTracerProjectile     >  \
-)
 
 void CExpGenSpawnable::InitSpawnables()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	auto funcTuple = MAKE_FUNCTIONS_TUPLE(GetSpawnableEntryImpl);
+	auto funcTuple = std::make_tuple(
+		GetSpawnableEntryImpl<CExpGenSpawner        >,
+		GetSpawnableEntryImpl<CStandardGroundFlash  >,
+		GetSpawnableEntryImpl<CSimpleGroundFlash    >,
+		GetSpawnableEntryImpl<CBitmapMuzzleFlame    >,
+		GetSpawnableEntryImpl<CDirtProjectile       >,
+		GetSpawnableEntryImpl<CExploSpikeProjectile >,
+		GetSpawnableEntryImpl<CHeatCloudProjectile  >,
+		GetSpawnableEntryImpl<CNanoProjectile       >,
+		GetSpawnableEntryImpl<CSimpleParticleSystem >,
+		GetSpawnableEntryImpl<CSphereParticleSpawner>,
+		GetSpawnableEntryImpl<CSmokeProjectile      >,
+		GetSpawnableEntryImpl<CSmokeProjectile2     >,
+		GetSpawnableEntryImpl<CSpherePartSpawner    >,
+		GetSpawnableEntryImpl<CTracerProjectile     >,
+		GetSpawnableEntryImpl<CDistortionEffect     >
+	);
 	static_assert(std::tuple_size<decltype(funcTuple)>::value == spawnables.size());
 
 	for (size_t i = 0; i < spawnables.size(); ++i) {
@@ -188,8 +188,6 @@ void CExpGenSpawnable::InitSpawnables()
 		spawnables[i] = entry;
 	}
 }
-
-#undef MAKE_FUNCTIONS_TUPLE
 
 bool CExpGenSpawnable::GetSpawnableMemberInfo(const std::string& spawnableName, SExpGenSpawnableMemberInfo& memberInfo)
 {
