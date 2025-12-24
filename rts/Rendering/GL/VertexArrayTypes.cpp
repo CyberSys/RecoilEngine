@@ -52,7 +52,8 @@ decltype(VA_TYPE_PROJ::attributeDefs) VA_TYPE_PROJ::attributeDefs = {
 	VA_ATTR_DEF(VA_TYPE_PROJ, 1, 3, GL_FLOAT, uvw, false, "uvw"),
 	VA_ATTR_DEF(VA_TYPE_PROJ, 2, 4, GL_FLOAT, uvInfo, false, "uvInfo"),
 	VA_ATTR_DEF(VA_TYPE_PROJ, 3, 3, GL_FLOAT, aparams, false, "aparams"),
-	VA_ATTR_DEF(VA_TYPE_PROJ, 4, 4, GL_UNSIGNED_BYTE, c, true, "color")
+	VA_ATTR_DEF(VA_TYPE_PROJ, 4, 4, GL_UNSIGNED_BYTE, c, true, "color"),
+	VA_ATTR_DEF(VA_TYPE_PROJ, 5, 2, GL_UNSIGNED_BYTE, dparams, true, "dparams")
 };
 
 decltype(VA_TYPE_TNT::attributeDefs) VA_TYPE_TNT::attributeDefs = {

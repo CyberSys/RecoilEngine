@@ -31,7 +31,6 @@ CDistortionEffect::CDistortionEffect()
 	: CProjectile()
 	, createTime(gs->frameNum)
 {
-	drawPost = true;
 }
 
 void CDistortionEffect::Init(const CUnit* owner, const float3& offset)

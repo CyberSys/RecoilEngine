@@ -116,7 +116,6 @@ public:
 
 	bool castShadow = false;
 	bool drawSorted = true;
-	bool drawPost = false;
 
 	bool blockPreciseCol = false;
 

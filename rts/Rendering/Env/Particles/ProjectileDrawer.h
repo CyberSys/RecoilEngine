@@ -30,7 +30,7 @@ public:
 	CProjectileDrawer()
 		: CEventClient("[CProjectileDrawer]", 123456, false)
 		, perlinFB(true)
-		, distortionFBO(true)
+		, particlesFBO(true)
 		, screenCopyFBO(true)
 	{}
 
@@ -173,13 +173,13 @@ private:
 	/// projectiles with a model, binned by model type and textures
 	std::array<ModelRenderContainer<CProjectile>, MODELTYPE_CNT> modelRenderers;
 
-	/// used to render particle effects in back-to-front order. {unsorted, sorted, post}
-	std::array<std::vector<CProjectile*>, 3> drawParticles;
+	/// used to render particle effects in back-to-front order. {unsorted, sorted}
+	std::array<std::vector<CProjectile*>, 2> drawParticles;
 
 	bool drawSorted = true;
 
 	Shader::IProgramObject* fxShader = nullptr;
-	Shader::IProgramObject* fxPostShader = nullptr;
+	Shader::IProgramObject* fxCombShader = nullptr;
 	Shader::IProgramObject* fxShadowShader = nullptr;
 
 	constexpr static int WANT_SOFTEN_COUNT = 2;
@@ -187,7 +187,7 @@ private:
 
 	bool wantDrawOrder = true;
 
-	FBO distortionFBO;
+	FBO particlesFBO;
 	FBO screenCopyFBO;
 	GL::Texture2D distortionTex;
 	GL::Texture2D screenCopyTex;
