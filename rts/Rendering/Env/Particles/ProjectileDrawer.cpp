@@ -296,7 +296,6 @@ void CProjectileDrawer::Init() {
 
 	fxShadowShader->SetUniform("atlasTex", 0);
 	fxShadowShader->SetUniform("alphaCtrl", 0.0f, 1.0f, 0.0f, 0.0f);
-	fxShadowShader->SetUniform("shadowColorMode", shadowHandler.shadowColorMode > 0 ? 1.0f : 0.0f);
 
 	fxShadowShader->Disable();
 	fxShadowShader->Validate();
@@ -909,7 +908,6 @@ void CProjectileDrawer::DrawShadowTransparent()
 
 	fxShadowShader->Enable();
 	fxShadowShader->SetFlag("USE_TEXTURE_ARRAY", (textureAtlas->GetNumPages() > 1));
-	fxShadowShader->SetUniform("shadowColorMode", shadowHandler.shadowColorMode > 0 ? 1.0f : 0.0f);
 
 	rb.DrawElements(GL_TRIANGLES);
 
