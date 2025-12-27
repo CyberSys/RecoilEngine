@@ -23,6 +23,11 @@
  */
 #define DEMOFILE_VERSION 5
 
+/**
+ * The current protocol version for packets, as recorded in stream chunks.
+ */
+#define PACKET_PROTOCOL_VERSION 1
+
 #pragma pack(push, 1)
 
 /**
@@ -70,6 +75,7 @@ struct DemoFileHeader
 	int teamStatElemSize;         ///< sizeof(CTeam::Statistics)
 	int teamStatPeriod;           ///< Interval (in seconds) between team stats.
 	int winningAllyTeamsSize;     ///< The size of the vector of the winning ally teams
+	int packetProtocolVersion;    ///< The version of the demofile/network packet protocol
 
 
 	/// Change structure from host endian to little endian or vice versa.
@@ -89,6 +95,7 @@ struct DemoFileHeader
 		swabDWordInPlace(teamStatElemSize);
 		swabDWordInPlace(teamStatPeriod);
 		swabDWordInPlace(winningAllyTeamsSize);
+		swabDWordInPlace(packetProtocolVersion);
 	}
 };
 

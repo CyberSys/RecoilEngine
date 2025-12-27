@@ -75,6 +75,7 @@ void CDemoRecorder::SetFileHeader()
 	fileHeader.teamStatElemSize = sizeof(TeamStatistics);
 	fileHeader.teamStatPeriod = TeamStatistics::statsPeriod;
 	fileHeader.winningAllyTeamsSize = 0;
+	fileHeader.packetProtocolVersion = PACKET_PROTOCOL_VERSION;
 }
 
 void CDemoRecorder::WriteDemoFile()
