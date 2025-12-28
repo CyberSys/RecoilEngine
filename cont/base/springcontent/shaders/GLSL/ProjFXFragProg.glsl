@@ -187,6 +187,7 @@ void main() {
 	//	distVec = vec4(0.0);
 	//#endif
 	//fragColor.rgb *= 10.0;
+	//fragColor = vec4(1);
 
 	if (AlphaDiscard(fragColor.a))
 		discard;

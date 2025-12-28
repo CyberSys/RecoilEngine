@@ -32,5 +32,6 @@ void main()
 	//fragColor = vec4(vec3(100.0*uvOff, 0.0), 1.0);
 	//fragColor = vec4(vec3(lodA), 1.0);
 	//fragColor = vec4(100.0 * vec3(uvOffMag), 1.0);
+	//fragColor = vec4(1);
 
 }

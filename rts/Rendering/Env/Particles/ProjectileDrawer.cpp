@@ -806,10 +806,17 @@ void CProjectileDrawer::DrawAlpha(bool drawAboveWater, bool drawBelowWater, bool
 	{
 		ZoneScopedN("ProjectileDrawer::DrawAlpha(RR)");
 		{
+
+			const bool mainPass = !drawReflection && !drawRefraction;
+
 			using namespace GL::State;
 			auto state = GL::SubState(
 				Blending(GL_TRUE),
 				BlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA),
+				StencilTest(mainPass),
+				StencilFunc(GL_ALWAYS, 1, 0xFF),
+				StencilOp(GL_KEEP, GL_KEEP, GL_REPLACE),
+				StencilMask(0xFF),
 				DepthTest(GL_TRUE),
 				DepthMask(GL_FALSE),
 				ClipDistance<0>(GL_TRUE)
@@ -822,8 +829,6 @@ void CProjectileDrawer::DrawAlpha(bool drawAboveWater, bool drawBelowWater, bool
 			if (!rb.ShouldSubmit())
 				return;
 
-			const bool mainPass = !drawReflection && !drawRefraction;
-
 			if (mainPass) {
 				const std::array rect = { 0, 0, globalRendering->viewSizeX, globalRendering->viewSizeY };
 				FBO::Blit(0, screenCopyFBO.GetId(), rect, rect, GL_COLOR_BUFFER_BIT, GL_NEAREST);
@@ -831,6 +836,9 @@ void CProjectileDrawer::DrawAlpha(bool drawAboveWater, bool drawBelowWater, bool
 
 				static constexpr float CV[] = { 0.0f, 0.0f, 0.0f, 1.0f };
 				glClearBufferfv(GL_COLOR, 1, CV);
+
+				glClearStencil(0);
+				glClear(GL_STENCIL_BUFFER_BIT);
 			}
 
 			glActiveTexture(GL_TEXTURE0); textureAtlas->BindTexture();
@@ -870,6 +878,8 @@ void CProjectileDrawer::DrawAlpha(bool drawAboveWater, bool drawBelowWater, bool
 
 			if (mainPass) {
 				FBO::Unbind();
+				const std::array rect = { 0, 0, globalRendering->viewSizeX, globalRendering->viewSizeY };
+				FBO::Blit(particlesFBO.GetId(), 0, rect, rect, GL_STENCIL_BUFFER_BIT, GL_NEAREST);
 				{
 					auto b = screenCopyTex.ScopedBind();
 					screenCopyTex.ProduceMipmaps();
@@ -878,6 +888,10 @@ void CProjectileDrawer::DrawAlpha(bool drawAboveWater, bool drawBelowWater, bool
 					using namespace GL::State;
 					auto state = GL::SubState(
 						Blending(GL_FALSE),
+						StencilTest(GL_TRUE),
+						StencilFunc(GL_NOTEQUAL, 0, 0xFF),
+						StencilOp(GL_KEEP, GL_KEEP, GL_ZERO),
+						StencilMask(0xFF),
 						DepthTest(GL_FALSE),
 						DepthMask(GL_FALSE)
 					);
@@ -1304,7 +1318,7 @@ void CProjectileDrawer::ViewResize()
 		particlesFBO = FBO(false);
 
 		particlesFBO.Bind();
-		particlesFBO.AttachTexture(depthBufferCopy->GetDepthBufferTexture(false), GL_TEXTURE_2D, GL_DEPTH_ATTACHMENT);
+		particlesFBO.AttachTexture(depthBufferCopy->GetDepthBufferTexture(false), GL_TEXTURE_2D, GL_DEPTH_STENCIL_ATTACHMENT);
 		particlesFBO.AttachTexture(screenCopyTex.GetId(), GL_TEXTURE_2D, GL_COLOR_ATTACHMENT0);
 		particlesFBO.AttachTexture(distortionTex.GetId(), GL_TEXTURE_2D, GL_COLOR_ATTACHMENT1);
 		particlesFBO.CheckStatus("PROJECTILE-DRAWER-PARTICLES");

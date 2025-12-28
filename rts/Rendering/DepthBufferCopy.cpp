@@ -133,9 +133,9 @@ void DepthBufferCopy::CreateTextureAndFBO(bool ms)
 	glTexParameteri(target, GL_TEXTURE_MAX_LEVEL, 0);
 	glTexParameteri(target, GL_TEXTURE_COMPARE_MODE, GL_NONE);
 
-	GLint depthFormat = static_cast<GLint>(CGlobalRendering::DepthBitsToFormat(globalRendering->supportDepthBufferBitDepth));
+	static constexpr GLint depthFormat = GL_DEPTH24_STENCIL8;
 	if (target == GL_TEXTURE_2D)
-		glTexImage2D(target, 0, depthFormat, globalRendering->viewSizeX, globalRendering->viewSizeY, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+		glTexImage2D(target, 0, depthFormat, globalRendering->viewSizeX, globalRendering->viewSizeY, 0, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, nullptr);
 	else
 		glTexImage2DMultisample(target, globalRendering->msaaLevel, depthFormat, globalRendering->viewSizeX, globalRendering->viewSizeY, GL_TRUE);
 
@@ -147,7 +147,7 @@ void DepthBufferCopy::CreateTextureAndFBO(bool ms)
 	depthFBO->Init(false);
 
 	depthFBO->Bind();
-	depthFBO->AttachTexture(depthTexture, target, GL_DEPTH_ATTACHMENT);
+	depthFBO->AttachTexture(depthTexture, target, GL_DEPTH_STENCIL_ATTACHMENT);
 	glDrawBuffer(GL_NONE);
 	depthFBO->CheckStatus("DEPTH-BUFFER-COPY-FBO" + ms ? "-MULTISAMPLED" : "");
 	depthFBO->Unbind();
