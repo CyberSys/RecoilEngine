@@ -4,44 +4,33 @@ in vec2 uv;
 
 uniform sampler2D screenCopyTex;
 uniform sampler2D distortionTex;
-uniform vec3 params; // uvOffMax, numberOfLODs, chromaticOberation
+uniform vec2 params; // numberOfLODs, chromaticOberation
 
 out vec4 fragColor;
 
-float easeOutSaturate(float bmin, float bmax, float x) {
-	// Normalize input to [0, 1] range
-	float t = clamp((x - bmin) / (bmax - bmin), 0.0, 1.0);
-
-	// Linear in lower/middle, saturate toward upper end
-	float it = 1.0 - t;
-	return 1.0 - it * it * it;
-}
-
 void main()
 {
-	vec2 uvOff = texture(distortionTex, uv).xy;
+	vec3 distTexVal = texture(distortionTex, uv).xyz;
+	vec2 uvOff = distTexVal.xy;
 	float uvOffMag = length(uvOff);
-	float uvOffMagMax = params.x;
-	//uvOffMagMax = 0.01;
-	
-	float uvRatio = uvOffMag / uvOffMagMax;
-	//
-	//if (uvRatio > 0.0) {
-	//	float adjFactor = easeOutSaturate(0.0, uvOffMagMax, uvOffMag) / uvRatio;
-	//	uvOff *= adjFactor;
-	//	uvOffMag *= adjFactor;
-	//}
 
-	float lodR = clamp(uvRatio, 0.0, 1.0);
-	float lodA = lodR * params.y;
-	//lodA = 0.0;
-	
+	float distTexIntensity = distTexVal.z;
+
+	float lodA = distTexIntensity * params.x;
+	//lodA = 0.0f;
+
 	fragColor = textureLod(screenCopyTex, uv + uvOff, lodA);
-	if (params.z != 0.0 && uvOffMag > 0.0) {
-		fragColor.r = textureLod(screenCopyTex, uv + (uvOff * (1.0 + 0.5 * params.z)), lodA).r;
-		fragColor.b = textureLod(screenCopyTex, uv + (uvOff * (1.0 - 0.5 * params.z)), lodA).b;
+	// Chromatic aberrations
+	if (params.y != 0.0 && uvOffMag > 0.0) {
+		fragColor.r = textureLod(screenCopyTex, uv + (uvOff * (1.0 + 0.5 * params.y)), lodA).r;
+		fragColor.b = textureLod(screenCopyTex, uv + (uvOff * (1.0 - 0.5 * params.y)), lodA).b;
 	}
 	//fragColor = vec4(100.0 * uvOff, 0.0, 1.0);
 	//fragColor = textureLod(screenCopyTex, uv, 0.0);
-	//fragColor = vec4(texture(distortionTex, uv).xy, 0.0, 1.0);
+	//fragColor = vec4(texture(distortionTex, uv).xy);
+	//fragColor = vec4(1, 0, 0, 1);
+	//fragColor = vec4(vec3(100.0*uvOff, 0.0), 1.0);
+	//fragColor = vec4(vec3(lodA), 1.0);
+	//fragColor = vec4(100.0 * vec3(uvOffMag), 1.0);
+
 }

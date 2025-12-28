@@ -19,6 +19,7 @@ in float vLayer;
 in float vBF;
 in float fragDist;
 in float fogFactor;
+// TODO move into ifdef
 in vec3 wsPos;
 in vec4 vsPos;
 in vec4 vsDistParam2;
@@ -26,7 +27,9 @@ in vec2 vsDistParam1;
 noperspective in vec2 screenUV;
 
 out vec4 fragColor;
+#ifdef WITH_DISTORTION
 out vec4 distVec;
+#endif
 
 #define projMatrix gl_ProjectionMatrix
 
@@ -48,51 +51,77 @@ bool AlphaDiscard(float a) {
 }
 
 // LLM generated derivative of
-//  https://github.com/BrianSharpe/Wombat/blob/master/Perlin2D.glsl
-vec2 Perlin2D2(in vec2 P)
+// https://github.com/BrianSharpe/Wombat/blob/master/Perlin3D.glsl
+vec2 Perlin3D2(vec3 P)
 {
-    // Establish our grid cell and unit position
-    vec2 Pi = floor(P);
-    vec4 Pf_Pfmin1 = P.xyxy - vec4( Pi, Pi + 1.0 );
+    // establish our grid cell and unit position
+    vec3 Pi = floor(P);
+    vec3 Pf = P - Pi;
+    vec3 Pf_min1 = Pf - 1.0;
 
-    // Calculate the hash
-    // (This part is identical to the original - high quality, low cost hashing)
-    vec4 Pt = vec4( Pi.xy, Pi.xy + 1.0 );
-    Pt = Pt - floor(Pt * ( 1.0 / 71.0 )) * 71.0;
-    Pt += vec2( 26.0, 161.0 ).xyxy;
+    // clamp the domain
+    Pi.xyz = Pi.xyz - floor(Pi.xyz * (1.0 / 69.0)) * 69.0;
+    vec3 Pi_inc1 = step(Pi, vec3(69.0 - 1.5)) * (Pi + 1.0);
+
+    // calculate the hash
+    vec4 Pt = vec4(Pi.xy, Pi_inc1.xy) + vec2(50.0, 161.0).xyxy;
     Pt *= Pt;
     Pt = Pt.xzxz * Pt.yyww;
-    vec4 hash_x = fract( Pt * ( 1.0 / 951.135664 ) );
-    vec4 hash_y = fract( Pt * ( 1.0 / 642.949883 ) );
+    const vec3 SOMELARGEFLOATS = vec3(635.298681, 682.357502, 668.926525);
+    const vec3 ZINC = vec3(48.500388, 65.294118, 63.934599);
+    vec3 lowz_mod = vec3(1.0 / (SOMELARGEFLOATS + Pi.zzz * ZINC));
+    vec3 highz_mod = vec3(1.0 / (SOMELARGEFLOATS + Pi_inc1.zzz * ZINC));
+    vec4 hashx0 = fract(Pt * lowz_mod.xxxx);
+    vec4 hashx1 = fract(Pt * highz_mod.xxxx);
+    vec4 hashy0 = fract(Pt * lowz_mod.yyyy);
+    vec4 hashy1 = fract(Pt * highz_mod.yyyy);
+    vec4 hashz0 = fract(Pt * lowz_mod.zzzz);
+    vec4 hashz1 = fract(Pt * highz_mod.zzzz);
 
-    // Calculate the gradient vectors
-    vec4 grad_x = hash_x - 0.49999;
-    vec4 grad_y = hash_y - 0.49999;
+    // calculate the gradients
+    vec4 grad_x0 = hashx0 - 0.49999;
+    vec4 grad_y0 = hashy0 - 0.49999;
+    vec4 grad_z0 = hashz0 - 0.49999;
+    vec4 grad_x1 = hashx1 - 0.49999;
+    vec4 grad_y1 = hashy1 - 0.49999;
+    vec4 grad_z1 = hashz1 - 0.49999;
 
-    // Compute the Normalization factor (reused for both components)
-    // We scale things to a strict -1.0->1.0 range here ( *= 1.41421...)
-    vec4 norm = inversesqrt( grad_x * grad_x + grad_y * grad_y ) * 1.414213562373095;
+    // Compute normalization factor (reused for both components)
+    vec4 norm0 = inversesqrt(grad_x0 * grad_x0 + grad_y0 * grad_y0 + grad_z0 * grad_z0);
+    vec4 norm1 = inversesqrt(grad_x1 * grad_x1 + grad_y1 * grad_y1 + grad_z1 * grad_z1);
 
     // Cache the distance vectors
-    vec4 px = Pf_Pfmin1.xzxz;
-    vec4 py = Pf_Pfmin1.yyww;
+    vec4 px = vec2(Pf.x, Pf_min1.x).xyxy;
+    vec4 py = vec2(Pf.y, Pf_min1.y).xxyy;
+    vec4 pz0 = Pf.zzzz;
+    vec4 pz1 = Pf_min1.zzzz;
 
-    // Component 1: Standard Dot Product ( grad . dist )
-    vec4 dot1 = norm * ( grad_x * px + grad_y * py );
+    // Component 1: Standard Dot Product (grad . dist)
+    vec4 dot1_0 = norm0 * (grad_x0 * px + grad_y0 * py + grad_z0 * pz0);
+    vec4 dot1_1 = norm1 * (grad_x1 * px + grad_y1 * py + grad_z1 * pz1);
 
-    // Component 2: Orthogonal Dot Product ( rotate gradient 90 deg: -y, x )
-    // This creates a second uncorrelated noise field with zero extra hashing.
-    vec4 dot2 = norm * ( -grad_y * px + grad_x * py );
+    // Component 2: Orthogonal Dot Product using cyclic permutation (y,z,x)
+    // This creates a second uncorrelated noise field with zero extra hashing
+    vec4 dot2_0 = norm0 * (grad_y0 * px + grad_z0 * py + grad_x0 * pz0);
+    vec4 dot2_1 = norm1 * (grad_y1 * px + grad_z1 * py + grad_x1 * pz1);
 
-    // Calculate Interpolation Weights (Quintic / Perlin Curve)
-    vec2 blend = Pf_Pfmin1.xy * Pf_Pfmin1.xy * Pf_Pfmin1.xy * (Pf_Pfmin1.xy * (Pf_Pfmin1.xy * 6.0 - 15.0) + 10.0);
-    vec4 blend2 = vec4( blend, vec2( 1.0 - blend ) );
+    // Classic Perlin Interpolation
+    vec3 blend = Pf * Pf * Pf * (Pf * (Pf * 6.0 - 15.0) + 10.0);
 
-    // Calculate final weights for the 4 corners
+    // Interpolate along z-axis for both components
+    vec4 res1_0 = mix(dot1_0, dot1_1, blend.z);
+    vec4 res2_0 = mix(dot2_0, dot2_1, blend.z);
+
+    // Calculate final weights for xy interpolation
+    vec4 blend2 = vec4(blend.xy, vec2(1.0 - blend.xy));
     vec4 weights = blend2.zxzx * blend2.wwyy;
 
     // Return the two independent noise values
-    return vec2( dot( dot1, weights ), dot( dot2, weights ) );
+    // Scale to strict -1.0->1.0 range
+    float final1 = dot(res1_0, weights) * 1.1547005383792515290182975610039;
+    float final2 = dot(res2_0, weights) * 1.1547005383792515290182975610039;
+
+    return vec2(final1, final2);
 }
 
 const vec3 LUMA = vec3(0.299, 0.587, 0.114);
@@ -126,25 +155,38 @@ void main() {
 	}
 	#endif
 
+	#ifdef WITH_DISTORTION
 	//vec2 uvMag = vsDistParam1 * distUni.y;
-	vec2 uvMag = vec2(1.0) * distUni.y;
+	vec2 uvMag = vec2(0.05);// * distUni.y;
+	vec2 worldPerPixeldX = dFdx(vsPos.xy);
+	vec2 worldPerPixeldY = dFdy(vsPos.xy);
+	float viewPerPixel = sqrt(dot(worldPerPixeldX, worldPerPixeldX) + dot(worldPerPixeldY, worldPerPixeldY));
 	if (dot(uvMag, uvMag) > 0.0) {
-		float distFactor = clamp((fragDist - distCamDist.x) / (distCamDist.y - distCamDist.x), 0.0, 1.0);
-		distFactor = pow(distFactor, 0.1);
-		distFactor = 1.0 - distFactor;
 		float distTexIntensity = dot(color.rgb, LUMA);
 		distTexIntensity = fragColor.a;
 		//distVec = vec4(Perlin2D2(10.0 * vsDistParam2.xy * vUV.xy + vsDistParam2.zw * distUni.x) * uvMag * fragColor.a, 0.0, fragColor.a);
-		distVec = vec4(Perlin2D2(vec2(0.08, 0.18) * wsPos.xy  + vec2(1.0, 1.0) * vec2(distUni.x)) * uvMag * pow(distTexIntensity, 0.75), 0.0, distTexIntensity);
-		distVec *= distFactor;
-		//distVec *= 1.0 - smoothstep(1000.0, 4000.0, fogDist);
-		//distVec = vec4(fragColor.rg, 0.0, fragColor.a);
-		//distVec.xy = vec2(distTexIntensity);
+		//distVec = vec4(Perlin2D2(vec2(0.08, 0.08) * vsPos.xy  + vec2(1.0, 1.0) * vec2(distUni.x)) * uvMag * pow(distTexIntensity, 0.75), 0.0, distTexIntensity);
+		vec3 perlinInput = vec3(0.08, 0.08, 0.08) * wsPos + vec3(1.0, 1.0, 1.0) * vec3(distUni.x);
+		distVec = vec4(
+			Perlin3D2(perlinInput) * uvMag / viewPerPixel * distTexIntensity, // vec2 uvOffset, premultiplied by distTexIntensity and reciprocal to viewPerPixel
+			distTexIntensity * distTexIntensity, // controls LOD level in the combination shader, squared for artistic purpose
+			distTexIntensity // controls the blending rate, although not saved in the texture / FBO
+		);
+		//distVec = vec4(uvMag, distTexIntensity * distTexIntensity, distTexIntensity * distTexIntensity);
+		//distVec = vec4(distTexIntensity);
+		//distVec.xy *= Perlin3D2(perlinInput) * uvMag;
+		//distVec.x *= pow(distTexIntensity, 0.0001);
 	} else {
 		distVec = vec4(0.0);
 	}
+	//distVec = vec4(0.0);
+	#endif
 	//distVec.xy = vec2(0.0);
 	//distVec = 10.0 * fragColor.aaaa;
+	//#else
+	//	distVec = vec4(0.0);
+	//#endif
+	//fragColor.rgb *= 10.0;
 
 	if (AlphaDiscard(fragColor.a))
 		discard;

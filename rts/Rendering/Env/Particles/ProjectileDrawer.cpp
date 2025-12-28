@@ -301,34 +301,39 @@ void CProjectileDrawer::Init() {
 	fxShadowShader->Disable();
 	fxShadowShader->Validate();
 
+	fxShaders[0] = shaderHandler->CreateProgramObject("[ProjectileDrawer::VFS]", "FX Shader (wo dist)");
+	fxShaders[1] = shaderHandler->CreateProgramObject("[ProjectileDrawer::VFS]", "FX Shader (w  dist)");
+	for (size_t i = 0; i < 2; ++i) {
+		auto* fxShader = fxShaders[i];
+		fxShader->AttachShaderObject(shaderHandler->CreateShaderObject("GLSL/ProjFXVertProg.glsl", "", GL_VERTEX_SHADER));
+		fxShader->AttachShaderObject(shaderHandler->CreateShaderObject("GLSL/ProjFXFragProg.glsl", "", GL_FRAGMENT_SHADER));
+		fxShader->SetFlag("SMOOTH_PARTICLES", true);
+		fxShader->SetFlag("WITH_DISTORTION", i == 1);
+		fxShader->SetFlag("DEPTH_CLIP01", globalRendering->supportClipSpaceControl);
+		fxShader->SetFlag("USE_TEXTURE_ARRAY", false);
 
-	fxShader = shaderHandler->CreateProgramObject("[ProjectileDrawer::VFS]", "FX Shader");
-	fxShader->AttachShaderObject(shaderHandler->CreateShaderObject("GLSL/ProjFXVertProg.glsl", "", GL_VERTEX_SHADER));
-	fxShader->AttachShaderObject(shaderHandler->CreateShaderObject("GLSL/ProjFXFragProg.glsl", "", GL_FRAGMENT_SHADER));
-	fxShader->SetFlag("SMOOTH_PARTICLES", CheckSoftenExt());
-	fxShader->SetFlag("DEPTH_CLIP01", globalRendering->supportClipSpaceControl);
-	fxShader->SetFlag("USE_TEXTURE_ARRAY", false);
+		using VAT = std::decay_t<decltype(CProjectile::GetPrimaryRenderBuffer())>::VertType;
+		fxShader->BindAttribLocations<VAT>();
 
-	using VAT = std::decay_t<decltype(CProjectile::GetPrimaryRenderBuffer())>::VertType;
-	fxShader->BindAttribLocations<VAT>();
+		fxShader->BindOutputLocation("fragColor", 0);
+		fxShader->BindOutputLocation("distVec", 1);
 
-	fxShader->BindOutputLocation("fragColor", 0);
-	fxShader->BindOutputLocation("distVec"  , 1);
+		fxShader->Link();
+		fxShader->Enable();
+		fxShader->SetUniform("atlasTex", 0);
+		fxShader->SetUniform("depthTex", 15);
+		fxShader->SetUniform("softenExponent", softenExponent[0], softenExponent[1]);
+		fxShader->SetUniform("softenThreshold", softenThreshold[0]);
+		fxShader->SetUniform("distUni", 0.0f, 0.0f);
 
-	fxShader->Link();
-	fxShader->Enable();
-	fxShader->SetUniform("atlasTex", 0);
-	fxShader->SetUniform("depthTex", 15);
-	fxShader->SetUniform("softenExponent", softenExponent[0], softenExponent[1]);
-	fxShader->SetUniform("softenThreshold", softenThreshold[0]);
-	fxShader->SetUniform("distUni", 0.0f, 0.0f);
+		fxShader->SetUniform("camPos", 0.0f, 0.0f, 0.0f);
+		fxShader->SetUniform("fogColor", 0.0f, 0.0f, 0.0f);
+		fxShader->SetUniform("fogParams", 0.0f, 0.0f);
 
-	fxShader->SetUniform("camPos", 0.0f, 0.0f, 0.0f);
-	fxShader->SetUniform("fogColor", 0.0f, 0.0f, 0.0f);
-	fxShader->SetUniform("fogParams", 0.0f, 0.0f);
+		fxShader->Disable();
+		fxShader->Validate();
+	}
 
-	fxShader->Disable();
-	fxShader->Validate();
 
 
 	fxCombShader = shaderHandler->CreateProgramObject("[ProjectileDrawer::VFS]", "FX Combination Shader");
@@ -339,7 +344,7 @@ void CProjectileDrawer::Init() {
 	fxCombShader->Enable();
 	fxCombShader->SetUniform("screenCopyTex", 0);
 	fxCombShader->SetUniform("distortionTex", 1);
-	fxCombShader->SetUniform("params", 0.0f, 0.0f, 0.0f);
+	fxCombShader->SetUniform("params", 0.0f, 0.0f);
 	fxCombShader->Disable();
 	fxCombShader->Validate();
 
@@ -379,7 +384,7 @@ void CProjectileDrawer::Kill() {
 	screenCopyTex = {};
 
 	shaderHandler->ReleaseProgramObjects("[ProjectileDrawer::VFS]");
-	fxShader = nullptr;
+	fxShaders = { nullptr };
 	fxShadowShader = nullptr;
 	fxCombShader = nullptr;
 	sdbc = nullptr;
@@ -454,15 +459,6 @@ void CProjectileDrawer::UpdateDrawFlags()
 		}
 	});
 
-}
-
-bool CProjectileDrawer::CheckSoftenExt()
-{
-	RECOIL_DETAILED_TRACY_ZONE;
-	static bool result =
-		FBO::IsSupported() &&
-		GLAD_GL_EXT_framebuffer_blit; //eval once
-	return result;
 }
 
 void CProjectileDrawer::ParseAtlasTextures(
@@ -826,16 +822,20 @@ void CProjectileDrawer::DrawAlpha(bool drawAboveWater, bool drawBelowWater, bool
 			if (!rb.ShouldSubmit())
 				return;
 
-			const std::array rect = { 0, 0, globalRendering->viewSizeX, globalRendering->viewSizeY };
-			FBO::Blit(0, screenCopyFBO.GetId(), rect, rect, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+			const bool mainPass = !drawReflection && !drawRefraction;
 
-			particlesFBO.Bind();
+			if (mainPass) {
+				const std::array rect = { 0, 0, globalRendering->viewSizeX, globalRendering->viewSizeY };
+				FBO::Blit(0, screenCopyFBO.GetId(), rect, rect, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+				particlesFBO.Bind();
 
-			static constexpr float CV[] = { 0.0f, 0.0f, 0.0f, 1.0f };
-			glClearBufferfv(GL_COLOR, 1, CV);
+				static constexpr float CV[] = { 0.0f, 0.0f, 0.0f, 1.0f };
+				glClearBufferfv(GL_COLOR, 1, CV);
+			}
 
 			glActiveTexture(GL_TEXTURE0); textureAtlas->BindTexture();
-			const bool needSoften = (wantSoften > 0) && !drawReflection && !drawRefraction;
+
+			const bool needSoften = (wantSoften > 0) && mainPass;
 			if (needSoften) {
 				glActiveTexture(GL_TEXTURE15); glBindTexture(GL_TEXTURE_2D, depthBufferCopy->GetDepthBufferTexture(false));
 			}
@@ -843,10 +843,12 @@ void CProjectileDrawer::DrawAlpha(bool drawAboveWater, bool drawBelowWater, bool
 			const auto* camPlayer = CCameraHandler::GetCamera(CCamera::CAMTYPE_PLAYER);
 			const auto& sky = ISky::GetSky();
 
+			auto* fxShader = fxShaders[mainPass];
 			fxShader->Enable();
 
 			fxShader->SetFlag("SMOOTH_PARTICLES", needSoften);
 			fxShader->SetFlag("USE_TEXTURE_ARRAY", (textureAtlas->GetNumPages() > 1));
+			fxShader->Link();
 			fxShader->SetUniform("clipPlane", clipPlane[0], clipPlane[1], clipPlane[2], clipPlane[3]);
 			fxShader->SetUniform("alphaCtrl", 0.0f, 1.0f, 0.0f, 0.0f);
 			fxShader->SetUniform("softenThreshold", CProjectileDrawer::softenThreshold[0]);
@@ -866,133 +868,39 @@ void CProjectileDrawer::DrawAlpha(bool drawAboveWater, bool drawBelowWater, bool
 			}
 			textureAtlas->UnbindTexture();
 
-			FBO::Unbind();
+			if (mainPass) {
+				FBO::Unbind();
+				{
+					auto b = screenCopyTex.ScopedBind();
+					screenCopyTex.ProduceMipmaps();
+				}
+				{
+					using namespace GL::State;
+					auto state = GL::SubState(
+						Blending(GL_FALSE),
+						DepthTest(GL_FALSE),
+						DepthMask(GL_FALSE)
+					);
 
-			auto b = screenCopyTex.ScopedBind();
-			screenCopyTex.ProduceMipmaps();
-		}
-		{
-			using namespace GL::State;
-			auto state = GL::SubState(
-				Blending(GL_FALSE),
-				DepthTest(GL_FALSE),
-				DepthMask(GL_FALSE)
-			);
+					auto b0 = screenCopyTex.ScopedBind(0);
+					auto b1 = distortionTex.ScopedBind(1);
 
-			auto b0 = screenCopyTex.ScopedBind(0);
-			auto b1 = distortionTex.ScopedBind(1);
+					fxCombShader->Enable();
+					fxCombShader->SetUniform("params",
+						static_cast<float>(screenCopyTex.GetNumLevels()),
+						0.8f
+					);
 
-			fxCombShader->Enable();
-			fxCombShader->SetUniform("params",
-				0.003f,
-				static_cast<float>(screenCopyTex.GetNumLevels()),
-				0.8f
-			);
+					distortionVAO.Bind();
+					glDrawArrays(GL_TRIANGLES, 0, 3); // full screen triangle
+					distortionVAO.Unbind();
 
-			distortionVAO.Bind();
-			glDrawArrays(GL_TRIANGLES, 0, 3); // full screen triangle
-			distortionVAO.Unbind();
-
-			fxCombShader->Disable();
-		}
-	}
-	/*
-	{
-		ZoneScopedN("ProjectileDrawer::DrawAlpha(DP)");
-		for (auto p : drawParticles[2]) {
-			p->Draw();
-		}
-	}
-	{
-		auto& rb = CExpGenSpawnable::GetPrimaryRenderBuffer();
-		if (!rb.ShouldSubmit())
-			return;
-
-		const std::array rect = { 0, 0, globalRendering->viewSizeX, globalRendering->viewSizeY};
-		FBO::Blit(0, screenCopyFBO.GetId(), rect, rect, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-		{
-			auto b = screenCopyTex.ScopedBind();
-			screenCopyTex.ProduceMipmaps();
-		}
-
-		ZoneScopedN("ProjectileDrawer::DrawAlpha(RP)");
-		{
-			using namespace GL::State;
-			auto state = GL::SubState(
-				Blending(GL_TRUE),
-				BlendFunc(GL_ZERO, GL_ONE_MINUS_SRC_COLOR),
-				DepthTest(GL_FALSE),
-				DepthMask(GL_FALSE),
-				ColorMask(GL_TRUE, GL_FALSE, GL_FALSE, GL_FALSE)
-			);
-
-			distortionFBO.Bind();
-
-			// Blending is
-			// R = (S * 0) + (D * (1 - S)), so D must be initialized to 1
-			glClearColor(1.0f, 0.0f, 0.0f, 0.0f);
-			glClear(GL_COLOR_BUFFER_BIT);
-
-			glActiveTexture(GL_TEXTURE0); textureAtlas->BindTexture();
-
-			if (needSoften) {
-				glActiveTexture(GL_TEXTURE15); glBindTexture(GL_TEXTURE_2D, depthBufferCopy->GetDepthBufferTexture(false));
+					fxCombShader->Disable();
+				}
 			}
-
-			const auto camPlayer = CCameraHandler::GetCamera(CCamera::CAMTYPE_PLAYER);
-
-			fxShader->Enable();
-			fxShader->SetFlag("SMOOTH_PARTICLES", needSoften);
-			fxShader->SetFlag("USE_TEXTURE_ARRAY", (textureAtlas->GetNumPages() > 1));
-			fxShader->SetUniform("clipPlane", clipPlane[0], clipPlane[1], clipPlane[2], clipPlane[3]);
-			fxShader->SetUniform("alphaCtrl", 0.0f, 1.0f, 0.0f, 0.0f);
-			fxShader->SetUniform("softenThreshold", CProjectileDrawer::softenThreshold[0]);
-
-			fxShader->SetUniform("camPos", camPlayer->pos.x, camPlayer->pos.y, camPlayer->pos.z);
-			fxShader->SetUniform("fogParams", std::numeric_limits<float>::max(), std::numeric_limits<float>::max()); // effectively disable fog
-
-			rb.DrawElements(GL_TRIANGLES);
-
-			fxShader->Disable();
-
-			if (needSoften) {
-				glBindTexture(GL_TEXTURE_2D, 0); //15th slot
-				glActiveTexture(GL_TEXTURE0);
-			}
-			textureAtlas->UnbindTexture();
-
-			distortionFBO.Unbind();
-
-			//glSaveTexture(distortionTex.GetId(), "distortion.png");
 		}
-		{
-			using namespace GL::State;
-			auto state = GL::SubState(
-				Blending(GL_FALSE),
-				DepthTest(GL_FALSE),
-				DepthMask(GL_FALSE)
-			);
 
-			auto b0 = screenCopyTex.ScopedBind(0);
-			auto b1 = distortionTex.ScopedBind(1);
-
-			fxPostShader->Enable();
-			fxPostShader->SetUniform("params",
-				gu->gameTime,
-				0.003f,
-				static_cast<float>(screenCopyTex.GetNumLevels()),
-				0.8f
-			);
-
-			distortionVAO.Bind();
-			glDrawArrays(GL_TRIANGLES, 0, 3); // full screen triangle
-			distortionVAO.Unbind();
-
-			fxPostShader->Disable();
-			fxPostShader->Validate();
-		}
 	}
-	*/
 }
 
 void CProjectileDrawer::DrawShadowOpaque()
@@ -1182,6 +1090,7 @@ void CProjectileDrawer::DrawGroundFlashes()
 	const auto camPlayer = CCameraHandler::GetCamera(CCamera::CAMTYPE_PLAYER);
 	const auto& sky = ISky::GetSky();
 
+	auto* fxShader = fxShaders[false];
 	fxShader->Enable();
 	fxShader->SetFlag("USE_TEXTURE_ARRAY", (groundFXAtlas->GetNumPages() > 1));
 	fxShader->SetUniform("alphaCtrl", 0.01f, 1.0f, 0.0f, 0.0f);
@@ -1375,7 +1284,7 @@ void CProjectileDrawer::ViewResize()
 			.wrapMirror = false
 		};
 
-		distortionTex = GL::Texture2D(globalRendering->viewSizeX, globalRendering->viewSizeY, GL_RG16F/*GL_RG16_SNORM*/, tcp, false);
+		distortionTex = GL::Texture2D(globalRendering->viewSizeX, globalRendering->viewSizeY, GL_RGB16F/*GL_RG16_SNORM*/, tcp, false);
 	}
 	{
 		static constexpr int32_t NUM_MIPS = 4;

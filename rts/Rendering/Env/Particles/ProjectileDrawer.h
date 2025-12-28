@@ -78,15 +78,7 @@ public:
 	bool EnableSorting(bool b) { return (drawSorted =           b); }
 	bool ToggleSorting(      ) { return (drawSorted = !drawSorted); }
 
-	static bool CheckSoftenExt();
-	bool CanDrawSoften() {
-		return
-			CheckSoftenExt() &&
-			fxShader && fxShader->IsValid() &&
-			depthBufferCopy->IsValid(false);
-	};
-
-	int EnableSoften(int b) { return CanDrawSoften() ? (wantSoften = std::clamp(b, 0, WANT_SOFTEN_COUNT - 1)) : 0; }
+	int EnableSoften(int b) { return wantSoften = std::clamp(b, 0, WANT_SOFTEN_COUNT - 1); }
 	int ToggleSoften() { return EnableSoften((wantSoften + 1) % WANT_SOFTEN_COUNT); }
 
 	int EnableDrawOrder(int b) { return wantDrawOrder = b; }
@@ -178,7 +170,7 @@ private:
 
 	bool drawSorted = true;
 
-	Shader::IProgramObject* fxShader = nullptr;
+	std::array<Shader::IProgramObject*, 2> fxShaders = { nullptr };
 	Shader::IProgramObject* fxCombShader = nullptr;
 	Shader::IProgramObject* fxShadowShader = nullptr;
 
