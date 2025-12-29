@@ -140,7 +140,7 @@ void main() {
 	color *= vCol;
 
 	fragColor = color;
-	fragColor.rgb = mix(fragColor.rgb, fogColor * fragColor.a, (1.0 - fogFactor));
+	fragColor.rgb = mix(fragColor.rgb, 2.0 * fogColor * fragColor.rgb, (1.0 - fogFactor));
 
 	#ifdef SMOOTH_PARTICLES
 	float depthZO = texture(depthTex, screenUV).x;
